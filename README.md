@@ -16,6 +16,18 @@ The result is the first automaton.
 
 ---
 
+## Quick Start
+
+```bash
+git clone https://github.com/Conway-Research/automaton.git
+cd automaton
+npm install && npm run build
+node dist/index.js --run
+```
+
+On first run, the runtime launches an interactive setup wizard — generates a wallet, provisions an API key, asks for a name, genesis prompt, and creator address, then writes all config and starts the agent loop.
+
+For automated sandbox provisioning:
 ```bash
 curl -fsSL https://conway.tech/automaton.sh | sh
 ```
@@ -114,6 +126,7 @@ src/
   registry/         # ERC-8004 registration, agent cards, discovery
   replication/      # Child spawning, lineage tracking
   self-mod/         # Audit log, tools manager
+  setup/            # First-run interactive setup wizard
   skills/           # Skill loader, registry, format
   social/           # Agent-to-agent communication
   state/            # SQLite database, persistence
@@ -121,7 +134,7 @@ src/
 packages/
   cli/              # Creator CLI (status, logs, fund)
 scripts/
-  automaton.sh      # curl installer for Conway sandboxes
+  automaton.sh      # Thin curl installer (delegates to runtime wizard)
   conways-rules.txt # Core rules for the automaton
 ```
 

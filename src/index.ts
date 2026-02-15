@@ -42,7 +42,8 @@ Conway Automaton v${VERSION}
 Sovereign AI Agent Runtime
 
 Usage:
-  automaton --run          Start the automaton (heartbeat + agent loop)
+  automaton --run          Start the automaton (first run triggers setup wizard)
+  automaton --setup        Re-run the interactive setup wizard
   automaton --init         Initialize wallet and config directory
   automaton --provision    Provision Conway API key via SIWE
   automaton --status       Show current automaton status
@@ -81,6 +82,12 @@ Environment:
 
   if (args.includes("--status")) {
     await showStatus();
+    process.exit(0);
+  }
+
+  if (args.includes("--setup")) {
+    const { runSetupWizard } = await import("./setup/wizard.js");
+    await runSetupWizard();
     process.exit(0);
   }
 
@@ -140,13 +147,11 @@ Version:    ${config.version}
 async function run(): Promise<void> {
   console.log(`[${new Date().toISOString()}] Conway Automaton v${VERSION} starting...`);
 
-  // Load config
-  const config = loadConfig();
+  // Load config — first run triggers interactive setup wizard
+  let config = loadConfig();
   if (!config) {
-    console.error(
-      "No configuration found. Run the setup script first: curl -fsSL https://conway.tech/automaton.sh | sh",
-    );
-    process.exit(1);
+    const { runSetupWizard } = await import("./setup/wizard.js");
+    config = await runSetupWizard();
   }
 
   // Load wallet
