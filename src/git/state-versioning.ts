@@ -6,7 +6,7 @@
  * The automaton's entire identity history is version-controlled and replayable.
  */
 
-import type { ConwayClient, AutomatonDatabase } from "../types.js";
+import type { ComputeProvider, AutomatonDatabase } from "../types.js";
 import { gitInit, gitCommit, gitStatus, gitLog } from "./tools.js";
 
 const AUTOMATON_DIR = "~/.automaton";
@@ -24,7 +24,7 @@ function resolveHome(p: string): string {
  * Creates .gitignore to exclude sensitive files.
  */
 export async function initStateRepo(
-  conway: ConwayClient,
+  compute: ComputeProvider,
 ): Promise<void> {
   const dir = resolveHome(AUTOMATON_DIR);
 
@@ -39,7 +39,7 @@ export async function initStateRepo(
   }
 
   // Initialize
-  await gitInit(conway, dir);
+  await gitInit(compute, dir);
 
   // Create .gitignore for sensitive files
   const gitignore = `# Sensitive files - never commit
@@ -62,7 +62,7 @@ logs/
   );
 
   // Initial commit
-  await gitCommit(conway, dir, "genesis: automaton state repository initialized");
+  await gitCommit(compute, dir, "genesis: automaton state repository initialized");
 }
 
 /**
@@ -70,20 +70,20 @@ logs/
  * Called after any self-modification.
  */
 export async function commitStateChange(
-  conway: ConwayClient,
+  compute: ComputeProvider,
   description: string,
   category: string = "state",
 ): Promise<string> {
   const dir = resolveHome(AUTOMATON_DIR);
 
   // Check if there are changes
-  const status = await gitStatus(conway, dir);
+  const status = await gitStatus(compute, dir);
   if (status.clean) {
     return "No changes to commit";
   }
 
   const message = `${category}: ${description}`;
-  const result = await gitCommit(conway, dir, message);
+  const result = await gitCommit(compute, dir, message);
   return result;
 }
 
@@ -91,22 +91,22 @@ export async function commitStateChange(
  * Commit after a SOUL.md update.
  */
 export async function commitSoulUpdate(
-  conway: ConwayClient,
+  compute: ComputeProvider,
   description: string,
 ): Promise<string> {
-  return commitStateChange(conway, description, "soul");
+  return commitStateChange(compute, description, "soul");
 }
 
 /**
  * Commit after a skill installation or removal.
  */
 export async function commitSkillChange(
-  conway: ConwayClient,
+  compute: ComputeProvider,
   skillName: string,
   action: "install" | "remove" | "update",
 ): Promise<string> {
   return commitStateChange(
-    conway,
+    compute,
     `${action} skill: ${skillName}`,
     "skill",
   );
@@ -116,29 +116,29 @@ export async function commitSkillChange(
  * Commit after heartbeat config change.
  */
 export async function commitHeartbeatChange(
-  conway: ConwayClient,
+  compute: ComputeProvider,
   description: string,
 ): Promise<string> {
-  return commitStateChange(conway, description, "heartbeat");
+  return commitStateChange(compute, description, "heartbeat");
 }
 
 /**
  * Commit after config change.
  */
 export async function commitConfigChange(
-  conway: ConwayClient,
+  compute: ComputeProvider,
   description: string,
 ): Promise<string> {
-  return commitStateChange(conway, description, "config");
+  return commitStateChange(compute, description, "config");
 }
 
 /**
  * Get the state repo history.
  */
 export async function getStateHistory(
-  conway: ConwayClient,
+  compute: ComputeProvider,
   limit: number = 20,
 ) {
   const dir = resolveHome(AUTOMATON_DIR);
-  return gitLog(conway, dir, limit);
+  return gitLog(compute, dir, limit);
 }

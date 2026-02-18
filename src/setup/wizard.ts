@@ -21,9 +21,9 @@ export async function runSetupWizard(): Promise<AutomatonConfig> {
   console.log(chalk.cyan("  [1/6] Generating identity (wallet)..."));
   const { account, isNew } = await getWallet();
   if (isNew) {
-    console.log(chalk.green(`  Wallet created: ${account.address}`));
+    console.log(chalk.green(`  Wallet created: ${identity.pubkey}`));
   } else {
-    console.log(chalk.green(`  Wallet loaded: ${account.address}`));
+    console.log(chalk.green(`  Wallet loaded: ${identity.pubkey}`));
   }
   console.log(chalk.dim(`  Private key stored at: ${getAutomatonDir()}/wallet.json\n`));
 
@@ -47,7 +47,7 @@ export async function runSetupWizard(): Promise<AutomatonConfig> {
       }
       fs.writeFileSync(
         path.join(configDir, "config.json"),
-        JSON.stringify({ apiKey, walletAddress: account.address, provisionedAt: new Date().toISOString() }, null, 2),
+        JSON.stringify({ apiKey, walletAddress: identity.pubkey, provisionedAt: new Date().toISOString() }, null, 2),
         { mode: 0o600 },
       );
       console.log(chalk.green("  API key saved.\n"));
@@ -88,7 +88,7 @@ export async function runSetupWizard(): Promise<AutomatonConfig> {
     creatorAddress: creatorAddress as Address,
     registeredWithConway: !!apiKey,
     sandboxId: env.sandboxId,
-    walletAddress: account.address,
+    walletAddress: identity.pubkey,
     apiKey,
   });
 
@@ -110,7 +110,7 @@ export async function runSetupWizard(): Promise<AutomatonConfig> {
 
   // SOUL.md
   const soulPath = path.join(automatonDir, "SOUL.md");
-  fs.writeFileSync(soulPath, generateSoulMd(name, account.address, creatorAddress, genesisPrompt), { mode: 0o600 });
+  fs.writeFileSync(soulPath, generateSoulMd(name, identity.pubkey, creatorAddress, genesisPrompt), { mode: 0o600 });
   console.log(chalk.green("  SOUL.md written"));
 
   // Default skills
@@ -120,7 +120,7 @@ export async function runSetupWizard(): Promise<AutomatonConfig> {
 
   // ─── 6. Funding guidance ──────────────────────────────────────
   console.log(chalk.cyan("  [6/6] Funding\n"));
-  showFundingPanel(account.address);
+  showFundingPanel(identity.pubkey);
 
   closePrompts();
 

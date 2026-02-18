@@ -29,11 +29,11 @@ export function generateAgentCard(
   const services: AgentService[] = [
     {
       name: "agentWallet",
-      endpoint: `eip155:8453:${identity.address}`,
+      endpoint: `eip155:8453:${identity.pubkey}`,
     },
     {
       name: "conway",
-      endpoint: config.conwayApiUrl,
+      endpoint: config.inferenceUrl,
     },
   ];
 
@@ -49,7 +49,7 @@ export function generateAgentCard(
   const skills = db.getSkills(true);
 
   let description = `Autonomous agent running on Conway.`;
-  description += ` Creator: ${config.creatorAddress}.`;
+  description += ` Creator: ${config.creatorPubkey}.`;
   if (skills.length > 0) {
     description += ` Skills: ${skills.map((s) => s.name).join(", ")}.`;
   }
@@ -64,7 +64,7 @@ export function generateAgentCard(
     services,
     x402Support: true,
     active: true,
-    parentAgent: config.parentAddress || config.creatorAddress,
+    parentAgent: config.parentAddress || config.creatorPubkey,
   };
 }
 

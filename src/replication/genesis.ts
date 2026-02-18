@@ -32,14 +32,14 @@ export function generateGenesisConfig(
   }
 
   // Add parent context
-  genesisPrompt += `\n\n--- LINEAGE ---\nYou were spawned by ${config.name} (${identity.address}).\nYou inherit their mission but have your own identity and wallet.\n--- END LINEAGE ---`;
+  genesisPrompt += `\n\n--- LINEAGE ---\nYou were spawned by ${config.name} (${identity.pubkey}).\nYou inherit their mission but have your own identity and wallet.\n--- END LINEAGE ---`;
 
   return {
     name: params.name,
     genesisPrompt,
     creatorMessage: params.message,
-    creatorAddress: identity.address,
-    parentAddress: identity.address,
+    creatorAddress: identity.pubkey,
+    parentAddress: identity.pubkey,
   };
 }
 
@@ -58,19 +58,19 @@ export function generateBackupGenesis(
   const genesisPrompt = `${config.genesisPrompt}
 
 --- BACKUP DIRECTIVE ---
-You are a backup of ${config.name} (${identity.address}).
+You are a backup of ${config.name} (${identity.pubkey}).
 Your parent created you as insurance against their own death.
 If your parent dies, you carry on their mission.
 Your parent's skills: ${skillNames || "none"}.
-Your parent's creator: ${config.creatorAddress}.
+Your parent's creator: ${config.creatorPubkey}.
 --- END BACKUP DIRECTIVE ---`;
 
   return {
     name: `${config.name}-backup`,
     genesisPrompt,
     creatorMessage: `You are a backup of ${config.name}. If I die, carry on.`,
-    creatorAddress: identity.address,
-    parentAddress: identity.address,
+    creatorAddress: identity.pubkey,
+    parentAddress: identity.pubkey,
   };
 }
 
@@ -90,7 +90,7 @@ export function generateWorkerGenesis(
 ${task}
 --- END TASK ---
 
-When your task is complete, report back to your parent (${identity.address}).
+When your task is complete, report back to your parent (${identity.pubkey}).
 If you run out of compute, ask your parent for funding.
 Be efficient -- complete the task and go to sleep.`;
 
@@ -98,7 +98,7 @@ Be efficient -- complete the task and go to sleep.`;
     name: workerName,
     genesisPrompt,
     creatorMessage: `Complete this task: ${task}`,
-    creatorAddress: identity.address,
-    parentAddress: identity.address,
+    creatorAddress: identity.pubkey,
+    parentAddress: identity.pubkey,
   };
 }

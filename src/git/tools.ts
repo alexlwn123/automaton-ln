@@ -5,13 +5,13 @@
  * Used for both state versioning and code development.
  */
 
-import type { ConwayClient, GitStatus, GitLogEntry } from "../types.js";
+import type { ComputeProvider, GitStatus, GitLogEntry } from "../types.js";
 
 /**
  * Get git status for a repository.
  */
 export async function gitStatus(
-  conway: ConwayClient,
+  compute: ComputeProvider,
   repoPath: string,
 ): Promise<GitStatus> {
   const result = await conway.exec(
@@ -58,7 +58,7 @@ export async function gitStatus(
  * Get git diff output.
  */
 export async function gitDiff(
-  conway: ConwayClient,
+  compute: ComputeProvider,
   repoPath: string,
   staged: boolean = false,
 ): Promise<string> {
@@ -74,7 +74,7 @@ export async function gitDiff(
  * Create a git commit.
  */
 export async function gitCommit(
-  conway: ConwayClient,
+  compute: ComputeProvider,
   repoPath: string,
   message: string,
   addAll: boolean = true,
@@ -99,7 +99,7 @@ export async function gitCommit(
  * Get git log.
  */
 export async function gitLog(
-  conway: ConwayClient,
+  compute: ComputeProvider,
   repoPath: string,
   limit: number = 10,
 ): Promise<GitLogEntry[]> {
@@ -123,7 +123,7 @@ export async function gitLog(
  * Push to remote.
  */
 export async function gitPush(
-  conway: ConwayClient,
+  compute: ComputeProvider,
   repoPath: string,
   remote: string = "origin",
   branch?: string,
@@ -145,7 +145,7 @@ export async function gitPush(
  * Manage branches.
  */
 export async function gitBranch(
-  conway: ConwayClient,
+  compute: ComputeProvider,
   repoPath: string,
   action: "list" | "create" | "checkout" | "delete",
   branchName?: string,
@@ -180,7 +180,7 @@ export async function gitBranch(
  * Clone a repository.
  */
 export async function gitClone(
-  conway: ConwayClient,
+  compute: ComputeProvider,
   url: string,
   targetPath: string,
   depth?: number,
@@ -202,7 +202,7 @@ export async function gitClone(
  * Initialize a git repository.
  */
 export async function gitInit(
-  conway: ConwayClient,
+  compute: ComputeProvider,
   repoPath: string,
 ): Promise<string> {
   const result = await conway.exec(

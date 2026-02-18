@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { BUILTIN_TASKS } from "../heartbeat/tasks.js";
 import {
-  MockConwayClient,
+  MockComputeProvider,
   MockSocialClient,
   createTestDb,
   createTestIdentity,
@@ -17,11 +17,11 @@ import type { AutomatonDatabase, InboxMessage } from "../types.js";
 
 describe("Heartbeat Tasks", () => {
   let db: AutomatonDatabase;
-  let conway: MockConwayClient;
+  let compute: MockComputeProvider;
 
   beforeEach(() => {
     db = createTestDb();
-    conway = new MockConwayClient();
+    compute = new MockComputeProvider();
   });
 
   afterEach(() => {
@@ -34,7 +34,7 @@ describe("Heartbeat Tasks", () => {
         identity: createTestIdentity(),
         config: createTestConfig(),
         db,
-        conway,
+        compute,
         // no social client
       });
 
@@ -69,7 +69,7 @@ describe("Heartbeat Tasks", () => {
         identity: createTestIdentity(),
         config: createTestConfig(),
         db,
-        conway,
+        compute,
         social,
       });
 
@@ -116,7 +116,7 @@ describe("Heartbeat Tasks", () => {
         identity: createTestIdentity(),
         config: createTestConfig(),
         db,
-        conway,
+        compute,
         social,
       };
 
@@ -141,7 +141,7 @@ describe("Heartbeat Tasks", () => {
         identity: createTestIdentity(),
         config: createTestConfig(),
         db,
-        conway,
+        compute,
         social,
       });
 

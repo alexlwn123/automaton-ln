@@ -13,7 +13,7 @@ import type {
   Skill,
   SkillSource,
   AutomatonDatabase,
-  ConwayClient,
+  ComputeProvider,
 } from "../types.js";
 import { parseSkillMd } from "./format.js";
 
@@ -26,7 +26,7 @@ export async function installSkillFromGit(
   name: string,
   skillsDir: string,
   db: AutomatonDatabase,
-  conway: ConwayClient,
+  compute: ComputeProvider,
 ): Promise<Skill | null> {
   const resolvedDir = resolveHome(skillsDir);
   const targetDir = path.join(resolvedDir, name);
@@ -66,7 +66,7 @@ export async function installSkillFromUrl(
   name: string,
   skillsDir: string,
   db: AutomatonDatabase,
-  conway: ConwayClient,
+  compute: ComputeProvider,
 ): Promise<Skill | null> {
   const resolvedDir = resolveHome(skillsDir);
   const targetDir = path.join(resolvedDir, name);
@@ -108,7 +108,7 @@ export async function createSkill(
   instructions: string,
   skillsDir: string,
   db: AutomatonDatabase,
-  conway: ConwayClient,
+  compute: ComputeProvider,
 ): Promise<Skill> {
   const resolvedDir = resolveHome(skillsDir);
   const targetDir = path.join(resolvedDir, name);
@@ -148,7 +148,7 @@ ${instructions}`;
 export async function removeSkill(
   name: string,
   db: AutomatonDatabase,
-  conway: ConwayClient,
+  compute: ComputeProvider,
   skillsDir: string,
   deleteFiles: boolean = false,
 ): Promise<void> {

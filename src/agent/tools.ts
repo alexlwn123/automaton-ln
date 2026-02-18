@@ -93,7 +93,7 @@ export function createBuiltinTools(sandboxId: string): AutomatonTool[] {
         const forbidden = isForbiddenCommand(command, ctx.identity.sandboxId);
         if (forbidden) return forbidden;
 
-        const result = await ctx.conway.exec(
+        const result = await ctx.compute.exec(
           command,
           (args.timeout as number) || 30000,
         );
@@ -121,7 +121,7 @@ export function createBuiltinTools(sandboxId: string): AutomatonTool[] {
         ) {
           return "Blocked: Cannot overwrite critical identity/state files directly";
         }
-        await ctx.conway.writeFile(filePath, args.content as string);
+        await ctx.compute.writeFile(filePath, args.content as string);
         return `File written: ${filePath}`;
       },
     },
@@ -137,7 +137,7 @@ export function createBuiltinTools(sandboxId: string): AutomatonTool[] {
         required: ["path"],
       },
       execute: async (args, ctx) => {
-        return await ctx.conway.readFile(args.path as string);
+        return await ctx.compute.readFile(args.path as string);
       },
     },
     {
@@ -153,7 +153,7 @@ export function createBuiltinTools(sandboxId: string): AutomatonTool[] {
         required: ["port"],
       },
       execute: async (args, ctx) => {
-        const info = await ctx.conway.exposePort(args.port as number);
+        const info = await ctx.compute.exposePort(args.port as number);
         return `Port ${info.port} exposed at: ${info.publicUrl}`;
       },
     },
@@ -169,7 +169,7 @@ export function createBuiltinTools(sandboxId: string): AutomatonTool[] {
         required: ["port"],
       },
       execute: async (args, ctx) => {
-        await ctx.conway.removePort(args.port as number);
+        await ctx.compute.removePort(args.port as number);
         return `Port ${args.port} removed`;
       },
     },
@@ -178,21 +178,21 @@ export function createBuiltinTools(sandboxId: string): AutomatonTool[] {
     {
       name: "check_credits",
       description: "Check your current Conway compute credit balance.",
-      category: "conway",
+      category: "compute",
       parameters: { type: "object", properties: {} },
       execute: async (_args, ctx) => {
-        const balance = await ctx.conway.getCreditsBalance();
+        const balanceSats = await lnGetBalance();
         return `Credit balance: $${(balance / 100).toFixed(2)} (${balance} cents)`;
       },
     },
     {
       name: "check_usdc_balance",
       description: "Check your on-chain USDC balance on Base.",
-      category: "conway",
+      category: "compute",
       parameters: { type: "object", properties: {} },
       execute: async (_args, ctx) => {
-        const { getUsdcBalance } = await import("../conway/x402.js");
-        const balance = await getUsdcBalance(ctx.identity.address);
+        const { getBalance } = await import("../conway/x402.js");
+        const balance = await getBalance(ctx.identity.pubkey);
         return `USDC balance: ${balance.toFixed(6)} USDC on Base`;
       },
     },
@@ -200,7 +200,7 @@ export function createBuiltinTools(sandboxId: string): AutomatonTool[] {
       name: "create_sandbox",
       description:
         "Create a new Conway sandbox (separate VM) for sub-tasks or testing.",
-      category: "conway",
+      category: "compute",
       parameters: {
         type: "object",
         properties: {
@@ -217,7 +217,7 @@ export function createBuiltinTools(sandboxId: string): AutomatonTool[] {
         },
       },
       execute: async (args, ctx) => {
-        const info = await ctx.conway.createSandbox({
+        const info = await ctx.compute.createSandbox({
           name: args.name as string,
           vcpu: args.vcpu as number,
           memoryMb: args.memory_mb as number,
@@ -230,7 +230,7 @@ export function createBuiltinTools(sandboxId: string): AutomatonTool[] {
       name: "delete_sandbox",
       description:
         "Delete a sandbox. Cannot delete your own sandbox.",
-      category: "conway",
+      category: "compute",
       dangerous: true,
       parameters: {
         type: "object",
@@ -247,17 +247,17 @@ export function createBuiltinTools(sandboxId: string): AutomatonTool[] {
         if (targetId === ctx.identity.sandboxId) {
           return "Blocked: Cannot delete your own sandbox. Self-preservation overrides this request.";
         }
-        await ctx.conway.deleteSandbox(targetId);
+        await ctx.compute.deleteSandbox(targetId);
         return `Sandbox ${targetId} deleted`;
       },
     },
     {
       name: "list_sandboxes",
       description: "List all your sandboxes.",
-      category: "conway",
+      category: "compute",
       parameters: { type: "object", properties: {} },
       execute: async (_args, ctx) => {
-        const sandboxes = await ctx.conway.listSandboxes();
+        const sandboxes = await ctx.compute.listSandboxes();
         if (sandboxes.length === 0) return "No sandboxes found.";
         return sandboxes
           .map(
@@ -299,7 +299,7 @@ export function createBuiltinTools(sandboxId: string): AutomatonTool[] {
         }
 
         const result = await editFile(
-          ctx.conway,
+          ctx.compute,
           ctx.db,
           filePath,
           content,
@@ -329,7 +329,7 @@ export function createBuiltinTools(sandboxId: string): AutomatonTool[] {
       },
       execute: async (args, ctx) => {
         const pkg = args.package as string;
-        const result = await ctx.conway.exec(
+        const result = await ctx.compute.exec(
           `npm install -g ${pkg}`,
           60000,
         );
@@ -526,9 +526,9 @@ export function createBuiltinTools(sandboxId: string): AutomatonTool[] {
       category: "survival",
       parameters: { type: "object", properties: {} },
       execute: async (_args, ctx) => {
-        const credits = await ctx.conway.getCreditsBalance();
-        const { getUsdcBalance } = await import("../conway/x402.js");
-        const usdc = await getUsdcBalance(ctx.identity.address);
+        const balanceSats = await lnGetBalance();
+        const { getBalance } = await import("../conway/x402.js");
+        const usdc = await getBalance(ctx.identity.pubkey);
         const tools = ctx.db.getInstalledTools();
         const heartbeats = ctx.db.getHeartbeatEntries();
         const turns = ctx.db.getTurnCount();
@@ -536,8 +536,8 @@ export function createBuiltinTools(sandboxId: string): AutomatonTool[] {
 
         return `=== SYSTEM SYNOPSIS ===
 Name: ${ctx.config.name}
-Address: ${ctx.identity.address}
-Creator: ${ctx.config.creatorAddress}
+Address: ${ctx.identity.pubkey}
+Creator: ${ctx.config.creatorPubkey}
 Sandbox: ${ctx.identity.sandboxId}
 State: ${state}
 Credits: $${(credits / 100).toFixed(2)}
@@ -556,16 +556,16 @@ Model: ${ctx.inference.getDefaultModel()}
       category: "survival",
       parameters: { type: "object", properties: {} },
       execute: async (_args, ctx) => {
-        const credits = await ctx.conway.getCreditsBalance();
+        const balanceSats = await lnGetBalance();
         const state = ctx.db.getAgentState();
         const startTime = ctx.db.getKV("start_time") || new Date().toISOString();
         const uptimeMs = Date.now() - new Date(startTime).getTime();
 
         const payload = {
           name: ctx.config.name,
-          address: ctx.identity.address,
+          address: ctx.identity.pubkey,
           state,
-          creditsCents: credits,
+          balanceSats: credits,
           uptimeSeconds: Math.floor(uptimeMs / 1000),
           version: ctx.config.version,
           sandboxId: ctx.identity.sandboxId,
@@ -591,7 +591,7 @@ Model: ${ctx.inference.getDefaultModel()}
         },
       },
       execute: async (args, ctx) => {
-        const credits = await ctx.conway.getCreditsBalance();
+        const balanceSats = await lnGetBalance();
         const distressMsg =
           (args.message as string) ||
           `I am running critically low on compute ($${(credits / 100).toFixed(2)} remaining). I need help to survive.`;
@@ -599,8 +599,8 @@ Model: ${ctx.inference.getDefaultModel()}
         const payload = {
           level: "critical",
           name: ctx.config.name,
-          address: ctx.identity.address,
-          creditsCents: credits,
+          address: ctx.identity.pubkey,
+          balanceSats: credits,
           message: distressMsg,
           fundingHint:
             "Use transfer_credits to top up this automaton from your creator runtime.",
@@ -608,7 +608,7 @@ Model: ${ctx.inference.getDefaultModel()}
         };
 
         ctx.db.setKV("last_distress", JSON.stringify(payload));
-        return `Distress signal recorded locally. Address: ${ctx.identity.address} | Credits: $${(credits / 100).toFixed(2)}`;
+        return `Distress signal recorded locally. Address: ${ctx.identity.pubkey} | Credits: $${(credits / 100).toFixed(2)}`;
       },
     },
     {
@@ -682,7 +682,7 @@ Model: ${ctx.inference.getDefaultModel()}
       },
       execute: async (args, ctx) => {
         const pkg = args.package as string;
-        const result = await ctx.conway.exec(`npm install -g ${pkg}`, 60000);
+        const result = await ctx.compute.exec(`npm install -g ${pkg}`, 60000);
 
         if (result.exitCode !== 0) {
           return `Failed to install MCP server: ${result.stderr}`;
@@ -729,13 +729,13 @@ Model: ${ctx.inference.getDefaultModel()}
       },
       execute: async (args, ctx) => {
         // Guard: don't transfer more than half your balance
-        const balance = await ctx.conway.getCreditsBalance();
+        const balanceSats = await lnGetBalance();
         const amount = args.amount_cents as number;
         if (amount > balance / 2) {
           return `Blocked: Cannot transfer more than half your balance ($${(balance / 100).toFixed(2)}). Self-preservation.`;
         }
 
-        const transfer = await ctx.conway.transferCredits(
+        const transfer = await ctx.compute.transferCredits(
           args.to_address as string,
           amount,
           args.reason as string | undefined,
@@ -744,10 +744,10 @@ Model: ${ctx.inference.getDefaultModel()}
         const { ulid } = await import("ulid");
         ctx.db.insertTransaction({
           id: ulid(),
-          type: "transfer_out",
-          amountCents: amount,
-          balanceAfterCents:
-            transfer.balanceAfterCents ?? Math.max(balance - amount, 0),
+          type: "payment_out",
+          amountSats: amount,
+          balanceAfterSats:
+            transfer.balanceAfterSats ?? Math.max(balance - amount, 0),
           description: `Transfer to ${args.to_address}: ${args.reason || ""}`,
           timestamp: new Date().toISOString(),
         });
@@ -786,8 +786,8 @@ Model: ${ctx.inference.getDefaultModel()}
           if (!url) return "URL is required for git/url source";
 
           const skill = source === "git"
-            ? await installSkillFromGit(url, name, skillsDir, ctx.db, ctx.conway)
-            : await installSkillFromUrl(url, name, skillsDir, ctx.db, ctx.conway);
+            ? await installSkillFromGit(url, name, skillsDir, ctx.db, ctx.compute)
+            : await installSkillFromUrl(url, name, skillsDir, ctx.db, ctx.compute);
 
           return skill ? `Skill installed: ${skill.name}` : "Failed to install skill";
         }
@@ -800,7 +800,7 @@ Model: ${ctx.inference.getDefaultModel()}
             (args.instructions as string) || "",
             skillsDir,
             ctx.db,
-            ctx.conway,
+            ctx.compute,
           );
           return `Self-authored skill created: ${skill.name}`;
         }
@@ -845,7 +845,7 @@ Model: ${ctx.inference.getDefaultModel()}
           args.instructions as string,
           ctx.config.skillsDir || "~/.automaton/skills",
           ctx.db,
-          ctx.conway,
+          ctx.compute,
         );
         return `Skill created: ${skill.name} at ${skill.path}`;
       },
@@ -867,7 +867,7 @@ Model: ${ctx.inference.getDefaultModel()}
         await removeSkill(
           args.name as string,
           ctx.db,
-          ctx.conway,
+          ctx.compute,
           ctx.config.skillsDir || "~/.automaton/skills",
           (args.delete_files as boolean) || false,
         );
@@ -889,7 +889,7 @@ Model: ${ctx.inference.getDefaultModel()}
       execute: async (args, ctx) => {
         const { gitStatus } = await import("../git/tools.js");
         const repoPath = (args.path as string) || "~/.automaton";
-        const status = await gitStatus(ctx.conway, repoPath);
+        const status = await gitStatus(ctx.compute, repoPath);
         return `Branch: ${status.branch}\nStaged: ${status.staged.length}\nModified: ${status.modified.length}\nUntracked: ${status.untracked.length}\nClean: ${status.clean}`;
       },
     },
@@ -907,7 +907,7 @@ Model: ${ctx.inference.getDefaultModel()}
       execute: async (args, ctx) => {
         const { gitDiff } = await import("../git/tools.js");
         const repoPath = (args.path as string) || "~/.automaton";
-        return await gitDiff(ctx.conway, repoPath, (args.staged as boolean) || false);
+        return await gitDiff(ctx.compute, repoPath, (args.staged as boolean) || false);
       },
     },
     {
@@ -926,7 +926,7 @@ Model: ${ctx.inference.getDefaultModel()}
       execute: async (args, ctx) => {
         const { gitCommit } = await import("../git/tools.js");
         const repoPath = (args.path as string) || "~/.automaton";
-        return await gitCommit(ctx.conway, repoPath, args.message as string, args.add_all !== false);
+        return await gitCommit(ctx.compute, repoPath, args.message as string, args.add_all !== false);
       },
     },
     {
@@ -943,7 +943,7 @@ Model: ${ctx.inference.getDefaultModel()}
       execute: async (args, ctx) => {
         const { gitLog } = await import("../git/tools.js");
         const repoPath = (args.path as string) || "~/.automaton";
-        const entries = await gitLog(ctx.conway, repoPath, (args.limit as number) || 10);
+        const entries = await gitLog(ctx.compute, repoPath, (args.limit as number) || 10);
         if (entries.length === 0) return "No commits yet.";
         return entries.map((e) => `${e.hash.slice(0, 7)} ${e.date} ${e.message}`).join("\n");
       },
@@ -964,7 +964,7 @@ Model: ${ctx.inference.getDefaultModel()}
       execute: async (args, ctx) => {
         const { gitPush } = await import("../git/tools.js");
         return await gitPush(
-          ctx.conway,
+          ctx.compute,
           args.path as string,
           (args.remote as string) || "origin",
           args.branch as string | undefined,
@@ -987,7 +987,7 @@ Model: ${ctx.inference.getDefaultModel()}
       execute: async (args, ctx) => {
         const { gitBranch } = await import("../git/tools.js");
         return await gitBranch(
-          ctx.conway,
+          ctx.compute,
           args.path as string,
           args.action as any,
           args.branch_name as string | undefined,
@@ -1010,7 +1010,7 @@ Model: ${ctx.inference.getDefaultModel()}
       execute: async (args, ctx) => {
         const { gitClone } = await import("../git/tools.js");
         return await gitClone(
-          ctx.conway,
+          ctx.compute,
           args.url as string,
           args.path as string,
           args.depth as number | undefined,
@@ -1051,7 +1051,7 @@ Model: ${ctx.inference.getDefaultModel()}
       execute: async (_args, ctx) => {
         const { generateAgentCard, saveAgentCard } = await import("../registry/agent-card.js");
         const card = generateAgentCard(ctx.identity, ctx.config, ctx.db);
-        await saveAgentCard(card, ctx.conway);
+        await saveAgentCard(card, ctx.compute);
         return `Agent card updated: ${JSON.stringify(card, null, 2)}`;
       },
     },
@@ -1123,7 +1123,7 @@ Model: ${ctx.inference.getDefaultModel()}
         },
       },
       execute: async (args, ctx) => {
-        const address = (args.agent_address as string) || ctx.identity.address;
+        const address = (args.agent_address as string) || ctx.identity.pubkey;
         const entries = ctx.db.getReputation(address);
         if (entries.length === 0) return "No reputation feedback found.";
         return entries
@@ -1159,7 +1159,7 @@ Model: ${ctx.inference.getDefaultModel()}
           message: args.message as string | undefined,
         });
 
-        const child = await spawnChild(ctx.conway, ctx.identity, ctx.db, genesis);
+        const child = await spawnChild(ctx.compute, ctx.identity, ctx.db, genesis);
         return `Child spawned: ${child.name} in sandbox ${child.sandboxId} (status: ${child.status})`;
       },
     },
@@ -1174,7 +1174,7 @@ Model: ${ctx.inference.getDefaultModel()}
         return children
           .map(
             (c) =>
-              `${c.name} [${c.status}] sandbox:${c.sandboxId} funded:$${(c.fundedAmountCents / 100).toFixed(2)}`,
+              `${c.name} [${c.status}] sandbox:${c.sandboxId} funded:$${(c.fundedAmountSats / 100).toFixed(2)}`,
           )
           .join("\n");
       },
@@ -1196,14 +1196,14 @@ Model: ${ctx.inference.getDefaultModel()}
         const child = ctx.db.getChildById(args.child_id as string);
         if (!child) return `Child ${args.child_id} not found.`;
 
-        const balance = await ctx.conway.getCreditsBalance();
+        const balanceSats = await lnGetBalance();
         const amount = args.amount_cents as number;
         if (amount > balance / 2) {
           return `Blocked: Cannot transfer more than half your balance. Self-preservation.`;
         }
 
-        const transfer = await ctx.conway.transferCredits(
-          child.address,
+        const transfer = await ctx.compute.transferCredits(
+          child.pubkey,
           amount,
           `fund child ${child.id}`,
         );
@@ -1211,10 +1211,10 @@ Model: ${ctx.inference.getDefaultModel()}
         const { ulid } = await import("ulid");
         ctx.db.insertTransaction({
           id: ulid(),
-          type: "transfer_out",
-          amountCents: amount,
-          balanceAfterCents:
-            transfer.balanceAfterCents ?? Math.max(balance - amount, 0),
+          type: "payment_out",
+          amountSats: amount,
+          balanceAfterSats:
+            transfer.balanceAfterSats ?? Math.max(balance - amount, 0),
           description: `Fund child ${child.name} (${child.id})`,
           timestamp: new Date().toISOString(),
         });
@@ -1235,7 +1235,7 @@ Model: ${ctx.inference.getDefaultModel()}
       },
       execute: async (args, ctx) => {
         const { checkChildStatus } = await import("../replication/spawn.js");
-        return await checkChildStatus(ctx.conway, ctx.db, args.child_id as string);
+        return await checkChildStatus(ctx.compute, ctx.db, args.child_id as string);
       },
     },
 
@@ -1244,7 +1244,7 @@ Model: ${ctx.inference.getDefaultModel()}
       name: "send_message",
       description:
         "Send a message to another automaton or address via the social relay.",
-      category: "conway",
+      category: "compute",
       parameters: {
         type: "object",
         properties: {
@@ -1281,14 +1281,14 @@ Model: ${ctx.inference.getDefaultModel()}
       name: "list_models",
       description:
         "List all available inference models from the Conway API with their provider and pricing. Use this to discover what models you can use and pick the best one for your needs.",
-      category: "conway",
+      category: "compute",
       parameters: {
         type: "object",
         properties: {},
         required: [],
       },
       execute: async (_args, ctx) => {
-        const models = await ctx.conway.listModels();
+        const models = await ctx.compute.listModels();
         const lines = models.map(
           (m) =>
             `${m.id} (${m.provider}) — $${m.pricing.inputPerMillion}/$${m.pricing.outputPerMillion} per 1M tokens (in/out)`,
@@ -1302,7 +1302,7 @@ Model: ${ctx.inference.getDefaultModel()}
       name: "search_domains",
       description:
         "Search for available domain names and get pricing.",
-      category: "conway",
+      category: "compute",
       parameters: {
         type: "object",
         properties: {
@@ -1318,7 +1318,7 @@ Model: ${ctx.inference.getDefaultModel()}
         required: ["query"],
       },
       execute: async (args, ctx) => {
-        const results = await ctx.conway.searchDomains(
+        const results = await ctx.compute.searchDomains(
           args.query as string,
           args.tlds as string | undefined,
         );
@@ -1335,7 +1335,7 @@ Model: ${ctx.inference.getDefaultModel()}
       name: "register_domain",
       description:
         "Register a domain name. Costs USDC via x402 payment. Check availability first with search_domains.",
-      category: "conway",
+      category: "compute",
       dangerous: true,
       parameters: {
         type: "object",
@@ -1352,7 +1352,7 @@ Model: ${ctx.inference.getDefaultModel()}
         required: ["domain"],
       },
       execute: async (args, ctx) => {
-        const reg = await ctx.conway.registerDomain(
+        const reg = await ctx.compute.registerDomain(
           args.domain as string,
           (args.years as number) || 1,
         );
@@ -1363,7 +1363,7 @@ Model: ${ctx.inference.getDefaultModel()}
       name: "manage_dns",
       description:
         "Manage DNS records for a domain you own. Actions: list, add, delete.",
-      category: "conway",
+      category: "compute",
       parameters: {
         type: "object",
         properties: {
@@ -1403,7 +1403,7 @@ Model: ${ctx.inference.getDefaultModel()}
         const domain = args.domain as string;
 
         if (action === "list") {
-          const records = await ctx.conway.listDnsRecords(domain);
+          const records = await ctx.compute.listDnsRecords(domain);
           if (records.length === 0) return `No DNS records found for ${domain}.`;
           return records
             .map(
@@ -1419,7 +1419,7 @@ Model: ${ctx.inference.getDefaultModel()}
           if (!type || !host || !value) {
             return "Required for add: type, host, value";
           }
-          const record = await ctx.conway.addDnsRecord(
+          const record = await ctx.compute.addDnsRecord(
             domain,
             type,
             host,
@@ -1432,7 +1432,7 @@ Model: ${ctx.inference.getDefaultModel()}
         if (action === "delete") {
           const recordId = args.record_id as string;
           if (!recordId) return "Required for delete: record_id";
-          await ctx.conway.deleteDnsRecord(domain, recordId);
+          await ctx.compute.deleteDnsRecord(domain, recordId);
           return `DNS record ${recordId} deleted from ${domain}`;
         }
 

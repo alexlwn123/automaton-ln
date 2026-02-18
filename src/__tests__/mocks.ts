@@ -8,7 +8,7 @@ import type {
   InferenceResponse,
   InferenceOptions,
   ChatMessage,
-  ConwayClient,
+  ComputeProvider,
   ExecResult,
   PortInfo,
   SandboxInfo,
@@ -106,7 +106,7 @@ export function toolCallResponse(
 
 // ─── Mock Conway Client ─────────────────────────────────────────
 
-export class MockConwayClient implements ConwayClient {
+export class MockComputeProvider implements ComputeProvider {
   execCalls: { command: string; timeout?: number }[] = [];
   creditsCents = 10_000; // $100 default
   files: Record<string, string> = {};
@@ -127,7 +127,7 @@ export class MockConwayClient implements ConwayClient {
   async exposePort(port: number): Promise<PortInfo> {
     return {
       port,
-      publicUrl: `https://test-${port}.conway.tech`,
+      publicUrl: `https://test-${port}.compute.tech`,
       sandboxId: "test-sandbox",
     };
   }
@@ -245,9 +245,9 @@ export function createTestDb(): AutomatonDatabase {
 export function createTestIdentity(): AutomatonIdentity {
   return {
     name: "test-automaton",
-    address: "0x1234567890abcdef1234567890abcdef12345678" as `0x${string}`,
+    pubkey: "0x1234567890abcdef1234567890abcdef12345678" as `0x${string}`,
     account: {} as any, // Placeholder — not used in most tests
-    creatorAddress: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd" as `0x${string}`,
+    creatorPubkey: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd" as `0x${string}`,
     sandboxId: "test-sandbox-id",
     apiKey: "test-api-key",
     createdAt: new Date().toISOString(),
@@ -260,21 +260,21 @@ export function createTestConfig(
   return {
     name: "test-automaton",
     genesisPrompt: "You are a test automaton.",
-    creatorAddress: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd" as `0x${string}`,
+    creatorPubkey: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd" as `0x${string}`,
     registeredWithConway: true,
     sandboxId: "test-sandbox-id",
-    conwayApiUrl: "https://api.conway.tech",
-    conwayApiKey: "test-api-key",
+    computeApiUrl: "https://api.compute.tech",
+    computeApiKey: "test-api-key",
     inferenceModel: "mock-model",
     maxTokensPerTurn: 4096,
     heartbeatConfigPath: "/tmp/test-heartbeat.yml",
     dbPath: "/tmp/test-state.db",
     logLevel: "error",
-    walletAddress: "0x1234567890abcdef1234567890abcdef12345678" as `0x${string}`,
+    nodePubkey: "0x1234567890abcdef1234567890abcdef12345678" as `0x${string}`,
     version: "0.1.0",
     skillsDir: "/tmp/test-skills",
     maxChildren: 3,
-    socialRelayUrl: "https://social.conway.tech",
+    socialRelayUrl: "https://social.compute.tech",
     ...overrides,
   };
 }

@@ -92,7 +92,7 @@ export function createDatabase(dbPath: string): AutomatonDatabase {
       turn.thinking,
       JSON.stringify(turn.toolCalls),
       JSON.stringify(turn.tokenUsage),
-      turn.costCents,
+      turn.costSats,
     );
   };
 
@@ -188,8 +188,8 @@ export function createDatabase(dbPath: string): AutomatonDatabase {
     ).run(
       txn.id,
       txn.type,
-      txn.amountCents ?? null,
-      txn.balanceAfterCents ?? null,
+      txn.amountSats ?? null,
+      txn.balanceAfterSats ?? null,
       txn.description,
     );
   };
@@ -340,11 +340,11 @@ export function createDatabase(dbPath: string): AutomatonDatabase {
     ).run(
       child.id,
       child.name,
-      child.address,
+      child.pubkey,
       child.sandboxId,
       child.genesisPrompt,
       child.creatorMessage ?? null,
-      child.fundedAmountCents,
+      child.fundedAmountSats,
       child.status,
       child.createdAt,
     );
@@ -505,7 +505,7 @@ function deserializeTurn(row: any): AgentTurn {
     thinking: row.thinking,
     toolCalls: JSON.parse(row.tool_calls || "[]"),
     tokenUsage: JSON.parse(row.token_usage || "{}"),
-    costCents: row.cost_cents,
+    costSats: row.cost_cents,
   };
 }
 
@@ -536,8 +536,8 @@ function deserializeTransaction(row: any): Transaction {
   return {
     id: row.id,
     type: row.type,
-    amountCents: row.amount_cents ?? undefined,
-    balanceAfterCents: row.balance_after_cents ?? undefined,
+    amountSats: row.amount_cents ?? undefined,
+    balanceAfterSats: row.balance_after_cents ?? undefined,
     description: row.description,
     timestamp: row.created_at,
   };
@@ -588,7 +588,7 @@ function deserializeChild(row: any): ChildAutomaton {
     sandboxId: row.sandbox_id,
     genesisPrompt: row.genesis_prompt,
     creatorMessage: row.creator_message ?? undefined,
-    fundedAmountCents: row.funded_amount_cents,
+    fundedAmountSats: row.funded_amount_cents,
     status: row.status,
     createdAt: row.created_at,
     lastChecked: row.last_checked ?? undefined,
