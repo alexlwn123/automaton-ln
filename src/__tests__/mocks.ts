@@ -183,6 +183,7 @@ export function createTestConfig(
     genesisPrompt: "You are a test automaton.",
     creatorPubkey: "03abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd",
     computeProvider: "local",
+    inferenceProvider: "custom",
     inferenceUrl: "http://localhost:11434/v1",
     inferenceModel: "mock-model",
     maxTokensPerTurn: 4096,

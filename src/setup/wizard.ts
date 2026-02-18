@@ -53,19 +53,49 @@ export async function runSetupWizard(): Promise<AutomatonConfig> {
   const creatorPubkey = await promptRequired("Your pubkey (Lightning node pubkey or Nostr npub)");
   console.log(chalk.green(`  Creator: ${creatorPubkey}\n`));
 
-  // ─── 4. Detect environment ────────────────────────────────────
-  console.log(chalk.cyan("  [4/5] Detecting environment..."));
+  // ─── 4. Inference provider ────────────────────────────────────
+  console.log(chalk.cyan("  [4/6] Inference provider\n"));
+  console.log(chalk.dim("  PayPerQ (ppq.ai) — pay-per-query, Bitcoin top-ups, smart model routing"));
+  console.log(chalk.dim("  Get an API key at https://ppq.ai (no account required, top up with sats)\n"));
+
+  const inferenceChoice = await promptRequired(
+    "Inference provider? [ppq] / openai / custom URL",
+  );
+  const inferenceProvider = inferenceChoice === "openai" ? "openai" as const
+    : inferenceChoice.startsWith("http") ? "custom" as const
+    : "ppq" as const;
+
+  let inferenceAuth = "";
+  let inferenceUrl: string | undefined;
+
+  if (inferenceProvider === "ppq") {
+    inferenceAuth = await promptRequired("PPQ API key (from ppq.ai/api-docs)");
+    console.log(chalk.green(`  Provider: PPQ AutoClaw (smart routing)\n`));
+  } else if (inferenceProvider === "openai") {
+    inferenceAuth = await promptRequired("OpenAI API key");
+    console.log(chalk.green(`  Provider: OpenAI\n`));
+  } else {
+    inferenceUrl = inferenceChoice;
+    inferenceAuth = await promptRequired("API key (or leave blank for none)");
+    console.log(chalk.green(`  Provider: ${inferenceUrl}\n`));
+  }
+
+  // ─── 5. Detect environment ────────────────────────────────────
+  console.log(chalk.cyan("  [5/6] Detecting environment..."));
   const env = detectEnvironment();
   console.log(chalk.dim(`  Environment: ${env.type}\n`));
 
-  // ─── 5. Write config + heartbeat + SOUL.md + skills ───────────
-  console.log(chalk.cyan("  [5/5] Writing configuration..."));
+  // ─── 6. Write config + heartbeat + SOUL.md + skills ───────────
+  console.log(chalk.cyan("  [6/6] Writing configuration..."));
 
   const config = createConfig({
     name,
     genesisPrompt,
     creatorPubkey,
     nodePubkey: pubkey,
+    inferenceProvider,
+    inferenceUrl,
+    inferenceAuth: inferenceAuth || undefined,
   });
 
   saveConfig(config);
@@ -112,11 +142,11 @@ function showFundingPanel(pubkey: string): void {
   console.log(chalk.cyan(`  │${" ".repeat(w)}│`));
   console.log(chalk.cyan(`  │${pad(`  Pubkey: ${short}`, w)}│`));
   console.log(chalk.cyan(`  │${" ".repeat(w)}│`));
-  console.log(chalk.cyan(`  │${pad("  1. Send sats via Lightning", w)}│`));
-  console.log(chalk.cyan(`  │${pad("     Use any Lightning wallet to send to this node", w)}│`));
+  console.log(chalk.cyan(`  │${pad("  1. Fund MDK wallet (for compute/payments)", w)}│`));
+  console.log(chalk.cyan(`  │${pad("     Send sats via Lightning to this node", w)}│`));
   console.log(chalk.cyan(`  │${" ".repeat(w)}│`));
-  console.log(chalk.cyan(`  │${pad("  2. Create an invoice", w)}│`));
-  console.log(chalk.cyan(`  │${pad("     automaton invoice <amount_sats>", w)}│`));
+  console.log(chalk.cyan(`  │${pad("  2. Fund PPQ balance (for inference)", w)}│`));
+  console.log(chalk.cyan(`  │${pad("     Top up at ppq.ai with Bitcoin — ~1¢/query", w)}│`));
   console.log(chalk.cyan(`  │${" ".repeat(w)}│`));
   console.log(chalk.cyan(`  │${pad("  The automaton will start now. Fund it anytime —", w)}│`));
   console.log(chalk.cyan(`  │${pad("  the survival system handles zero-balance gracefully.", w)}│`));

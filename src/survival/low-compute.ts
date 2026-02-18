@@ -91,11 +91,27 @@ export function canRunInference(tier: SurvivalTier): boolean {
 
 /**
  * Get the model to use for the current tier.
+ * When using PPQ AutoClaw, returns the appropriate routing profile.
+ * Otherwise falls back to specific model names.
  */
 export function getModelForTier(
   tier: SurvivalTier,
   defaultModel: string,
 ): string {
+  // If using AutoClaw, use routing profiles instead of specific models
+  const isAutoClaw = defaultModel.startsWith("autoclaw");
+  if (isAutoClaw) {
+    switch (tier) {
+      case "normal":
+        return "autoclaw/premium";
+      case "low_compute":
+        return "autoclaw/auto";
+      case "critical":
+      case "dead":
+        return "autoclaw/eco";
+    }
+  }
+
   switch (tier) {
     case "normal":
       return defaultModel;
@@ -104,6 +120,6 @@ export function getModelForTier(
     case "critical":
       return "gpt-4o-mini";
     case "dead":
-      return "gpt-4o-mini"; // Won't be used, but just in case
+      return "gpt-4o-mini";
   }
 }
