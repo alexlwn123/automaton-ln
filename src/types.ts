@@ -49,6 +49,7 @@ export interface AutomatonConfig {
   };
 
   // Inference (pluggable)
+  inferenceProvider: "ppq" | "openai" | "custom"; // Which provider to use
   inferenceUrl: string;
   inferenceAuth?: string; // API key, "l402", or undefined for local
   inferenceModel: string;
@@ -75,8 +76,9 @@ export interface AutomatonConfig {
 
 export const DEFAULT_CONFIG: Partial<AutomatonConfig> = {
   computeProvider: "local",
-  inferenceUrl: "https://api.openai.com/v1",
-  inferenceModel: "gpt-4o",
+  inferenceProvider: "ppq",
+  inferenceUrl: "https://api.ppq.ai",
+  inferenceModel: "autoclaw/auto",
   maxTokensPerTurn: 4096,
   heartbeatConfigPath: "~/.automaton/heartbeat.yml",
   dbPath: "~/.automaton/state.db",

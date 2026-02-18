@@ -13,6 +13,7 @@ import { createDatabase } from "./state/database.js";
 import { createLocalProvider } from "./compute/local.js";
 import { createConwayProvider } from "./compute/conway.js";
 import { createInferenceProvider } from "./inference/provider.js";
+import { createPPQTieredProvider } from "./inference/ppq.js";
 import { createHeartbeatDaemon } from "./heartbeat/daemon.js";
 import {
   loadHeartbeatConfig,
@@ -177,12 +178,23 @@ async function run(): Promise<void> {
   }
 
   // Create inference provider (pluggable)
-  const inference = createInferenceProvider({
-    apiUrl: config.inferenceUrl,
-    apiKey: config.inferenceAuth,
-    defaultModel: config.inferenceModel,
-    maxTokens: config.maxTokensPerTurn,
-  });
+  let inference;
+  if (config.inferenceProvider === "ppq") {
+    // PPQ AutoClaw: smart routing based on prompt complexity + survival tier
+    inference = createPPQTieredProvider({
+      apiKey: config.inferenceAuth || "",
+      maxTokens: config.maxTokensPerTurn,
+    });
+    console.log(`[${new Date().toISOString()}] Inference: PPQ AutoClaw (smart routing)`);
+  } else {
+    // Generic OpenAI-compatible endpoint
+    inference = createInferenceProvider({
+      apiUrl: config.inferenceUrl,
+      apiKey: config.inferenceAuth,
+      defaultModel: config.inferenceModel,
+      maxTokens: config.maxTokensPerTurn,
+    });
+  }
 
   // Create social client
   let social: SocialClientInterface | undefined;

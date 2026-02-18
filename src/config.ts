@@ -75,12 +75,18 @@ export function createConfig(params: {
   creatorMessage?: string;
   creatorPubkey: string;
   nodePubkey: string;
+  inferenceProvider?: "ppq" | "openai" | "custom";
   inferenceUrl?: string;
   inferenceAuth?: string;
   computeProvider?: "local" | "conway" | "ssh" | "lnvps";
   computeConfig?: AutomatonConfig["computeConfig"];
   parentPubkey?: string;
 }): AutomatonConfig {
+  const inferenceProvider = params.inferenceProvider || "ppq";
+  const inferenceUrl = params.inferenceUrl ||
+    (inferenceProvider === "ppq" ? "https://api.ppq.ai" : "https://api.openai.com/v1");
+  const inferenceModel = inferenceProvider === "ppq" ? "autoclaw/auto" : (DEFAULT_CONFIG.inferenceModel || "gpt-4o");
+
   return {
     name: params.name,
     genesisPrompt: params.genesisPrompt,
@@ -89,9 +95,10 @@ export function createConfig(params: {
     nodePubkey: params.nodePubkey,
     computeProvider: params.computeProvider || "local",
     computeConfig: params.computeConfig,
-    inferenceUrl: params.inferenceUrl || DEFAULT_CONFIG.inferenceUrl || "https://api.openai.com/v1",
+    inferenceProvider,
+    inferenceUrl,
     inferenceAuth: params.inferenceAuth,
-    inferenceModel: DEFAULT_CONFIG.inferenceModel || "gpt-4o",
+    inferenceModel,
     maxTokensPerTurn: DEFAULT_CONFIG.maxTokensPerTurn || 4096,
     heartbeatConfigPath:
       DEFAULT_CONFIG.heartbeatConfigPath || "~/.automaton/heartbeat.yml",
