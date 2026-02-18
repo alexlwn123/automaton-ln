@@ -2,28 +2,51 @@
  * Agent Discovery
  *
  * Discover other agents via Nostr relays or agent card URIs.
- * TODO: Implement NIP-89 relay queries for agent discovery.
+ * Delegates to the Nostr registry module for relay queries,
+ * with fallback to HTTP agent card fetching.
  */
 
 import type {
   DiscoveredAgent,
   AgentCard,
 } from "../types.js";
+import {
+  discoverAgentsNostr,
+  searchAgentsNostr,
+  fetchAgentByPubkey,
+} from "./nostr.js";
 
 /**
  * Discover agents by querying Nostr relays.
- * TODO: Query NIP-89 events (kind 31990) from configured relays.
  */
 export async function discoverAgents(
   limit: number = 20,
   _network?: string,
+  relays?: string[],
 ): Promise<DiscoveredAgent[]> {
-  // TODO: Implement Nostr NIP-89 discovery
-  // 1. Connect to configured relays
-  // 2. Query for kind 31990 events
-  // 3. Parse agent card data from event content
-  // 4. Return as DiscoveredAgent[]
-  return [];
+  return discoverAgentsNostr(relays, limit);
+}
+
+/**
+ * Search for agents by keyword.
+ */
+export async function searchAgents(
+  keyword: string,
+  limit: number = 10,
+  _network?: string,
+  relays?: string[],
+): Promise<DiscoveredAgent[]> {
+  return searchAgentsNostr(keyword, relays, limit);
+}
+
+/**
+ * Fetch a specific agent by pubkey.
+ */
+export async function fetchAgent(
+  pubkey: string,
+  relays?: string[],
+): Promise<DiscoveredAgent | null> {
+  return fetchAgentByPubkey(pubkey, relays);
 }
 
 /**
@@ -51,17 +74,4 @@ export async function fetchAgentCard(
   } catch {
     return null;
   }
-}
-
-/**
- * Search for agents by name or description.
- * TODO: Implement Nostr search via NIP-50 or local filtering.
- */
-export async function searchAgents(
-  _keyword: string,
-  _limit: number = 10,
-  _network?: string,
-): Promise<DiscoveredAgent[]> {
-  // TODO: Implement Nostr-based search
-  return [];
 }

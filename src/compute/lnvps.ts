@@ -1,22 +1,37 @@
 /**
  * LNVPS Compute Provider
  *
- * No-KYC VPS provisioning via Lightning payments.
- * Auth: NIP-98 (signed Nostr events)
- * Payment: Lightning invoices
- * API: https://lnvps.net/api/v1
+ * Provisions and manages VPS instances from lnvps.net,
+ * a no-KYC VPS provider that accepts Lightning payments.
  *
- * The automaton creates a VPS, pays with Lightning, SSHes in.
- * If it can't pay the renewal, the VPS expires and the automaton dies.
+ * Auth: NIP-98 (signed Nostr events as HTTP Authorization header)
+ * Payment: Lightning invoices via MDK
+ * Execution: SSH into the provisioned VPS
+ *
+ * API base: https://lnvps.net/api/v1
+ *
+ * Endpoints used:
+ *   POST   /vm              — Create VM
+ *   GET    /vm/{id}         — VM status
+ *   GET    /vm/{id}/renew   — Get renewal invoice
+ *   PATCH  /vm/{id}/start   — Start VM
+ *   PATCH  /vm/{id}/stop    — Stop VM
+ *   PATCH  /vm/{id}/restart — Restart VM
+ *   GET    /vm/templates    — List available templates/pricing
+ *   POST   /ssh-key         — Register SSH key
+ *   GET    /payment/{id}    — Poll payment status
  */
 
-import type { ComputeProvider, ExecResult } from "../types.js";
-import { payInvoice } from "../lightning/payments.js";
+import { execSync } from "child_process";
+import type { ComputeProvider, ExecResult, PortInfo } from "../types.js";
+import { createNip98Token, type NostrIdentity } from "../identity/nostr.js";
 
-// ─── Types ───────────────────────────────────────────────────────
+const DEFAULT_API_URL = "https://lnvps.net/api/v1";
+const SSH_TIMEOUT_MS = 30_000;
 
 export interface LnvpsConfig {
-  apiUrl: string; // default: https://lnvps.net
+  apiUrl?: string;
+  nostrIdentity: NostrIdentity;
   vmId?: number;
   sshHost?: string;
   sshUser?: string;
@@ -25,191 +40,220 @@ export interface LnvpsConfig {
 
 export interface VmTemplate {
   id: number;
+  name: string;
   cpu: number;
-  memory: number;
-  disk: number;
+  memory: number; // MB
+  disk: number; // GB
+  priceSats: number; // monthly
   region: string;
-  cost: { amount: number; currency: string };
 }
 
-export interface VmStatus {
+export interface VmInfo {
   id: number;
   status: string;
-  ipv4?: string;
-  ipv6?: string;
+  ip?: string;
+  template: number;
   expiresAt?: string;
+  sshHost?: string;
 }
 
-export interface VmPayment {
+export interface LnvpsPayment {
   id: string;
   invoice: string;
   amountSats: number;
   isPaid: boolean;
 }
 
-// ─── NIP-98 Auth (placeholder) ──────────────────────────────────
+/**
+ * Make an authenticated request to the LNVPS API.
+ */
+async function lnvpsRequest(
+  apiUrl: string,
+  path: string,
+  method: string,
+  nostrId: NostrIdentity,
+  body?: Record<string, unknown>,
+): Promise<any> {
+  const url = `${apiUrl}${path}`;
+  const token = await createNip98Token(url, method, nostrId.secretKey);
+
+  const resp = await fetch(url, {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Nostr ${token}`,
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => resp.statusText);
+    throw new Error(`LNVPS API error (${resp.status} ${method} ${path}): ${text}`);
+  }
+
+  return resp.json();
+}
+
+// ─── VM Lifecycle Management ────────────────────────────────────
 
 /**
- * Create a NIP-98 Authorization header.
- * Requires nostr-tools for real implementation.
- * TODO: implement with nostr-tools when adding full LNVPS support
+ * List available VM templates and pricing.
  */
-function createNip98Auth(_url: string, _method: string): string {
-  // Placeholder — real implementation signs a Nostr event (kind 27235)
-  // with the URL and method, then base64-encodes it
-  throw new Error(
-    "NIP-98 auth not yet implemented. Install nostr-tools and implement signing.",
+export async function listTemplates(
+  nostrId: NostrIdentity,
+  apiUrl: string = DEFAULT_API_URL,
+): Promise<VmTemplate[]> {
+  const data = await lnvpsRequest(apiUrl, "/vm/templates", "GET", nostrId);
+  return (data.templates || data || []).map((t: any) => ({
+    id: t.id,
+    name: t.name || `${t.cpu}vCPU/${t.memory}MB/${t.disk}GB`,
+    cpu: t.cpu,
+    memory: t.memory,
+    disk: t.disk,
+    priceSats: t.cost_plan?.amount || t.price_sats || 0,
+    region: t.region || "unknown",
+  }));
+}
+
+/**
+ * Register an SSH key with LNVPS.
+ */
+export async function registerSshKey(
+  name: string,
+  publicKey: string,
+  nostrId: NostrIdentity,
+  apiUrl: string = DEFAULT_API_URL,
+): Promise<{ id: number }> {
+  return lnvpsRequest(apiUrl, "/ssh-key", "POST", nostrId, {
+    name,
+    key: publicKey,
+  });
+}
+
+/**
+ * Create a new VM.
+ */
+export async function createVm(
+  templateId: number,
+  imageId: number,
+  sshKeyId: number,
+  nostrId: NostrIdentity,
+  apiUrl: string = DEFAULT_API_URL,
+): Promise<VmInfo> {
+  return lnvpsRequest(apiUrl, "/vm", "POST", nostrId, {
+    template_id: templateId,
+    image_id: imageId,
+    ssh_key_id: sshKeyId,
+  });
+}
+
+/**
+ * Get VM status.
+ */
+export async function getVmStatus(
+  vmId: number,
+  nostrId: NostrIdentity,
+  apiUrl: string = DEFAULT_API_URL,
+): Promise<VmInfo> {
+  return lnvpsRequest(apiUrl, `/vm/${vmId}`, "GET", nostrId);
+}
+
+/**
+ * Get a renewal/payment invoice for a VM.
+ */
+export async function getRenewalInvoice(
+  vmId: number,
+  nostrId: NostrIdentity,
+  apiUrl: string = DEFAULT_API_URL,
+): Promise<LnvpsPayment> {
+  return lnvpsRequest(
+    apiUrl,
+    `/vm/${vmId}/renew?method=lightning`,
+    "GET",
+    nostrId,
   );
 }
 
-// ─── LNVPS API Client ───────────────────────────────────────────
-
-export class LnvpsClient {
-  private apiUrl: string;
-
-  constructor(apiUrl: string = "https://lnvps.net") {
-    this.apiUrl = apiUrl;
-  }
-
-  private async request(
-    method: string,
-    path: string,
-    body?: unknown,
-  ): Promise<any> {
-    const url = `${this.apiUrl}${path}`;
-    const auth = createNip98Auth(url, method);
-
-    const resp = await fetch(url, {
-      method,
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Nostr ${auth}`,
-      },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-
-    if (!resp.ok) {
-      const text = await resp.text();
-      throw new Error(`LNVPS API error: ${method} ${path} -> ${resp.status}: ${text}`);
-    }
-
-    return resp.json();
-  }
-
-  /** List available VM templates with pricing */
-  async listTemplates(): Promise<VmTemplate[]> {
-    const result = await this.request("GET", "/api/v1/vm/templates");
-    return result.templates || [];
-  }
-
-  /** Create a VM order (initially unpaid/expired) */
-  async createVm(templateId: number, imageId: number, sshKeyId: number): Promise<VmStatus> {
-    return this.request("POST", "/api/v1/vm", {
-      template_id: templateId,
-      image_id: imageId,
-      ssh_key_id: sshKeyId,
-    });
-  }
-
-  /** Get VM status */
-  async getVmStatus(vmId: number): Promise<VmStatus> {
-    return this.request("GET", `/api/v1/vm/${vmId}`);
-  }
-
-  /** Get Lightning invoice to renew/pay for VM */
-  async renewVm(vmId: number): Promise<VmPayment> {
-    return this.request("GET", `/api/v1/vm/${vmId}/renew?method=lightning`);
-  }
-
-  /** Start VM */
-  async startVm(vmId: number): Promise<void> {
-    await this.request("PATCH", `/api/v1/vm/${vmId}/start`);
-  }
-
-  /** Stop VM */
-  async stopVm(vmId: number): Promise<void> {
-    await this.request("PATCH", `/api/v1/vm/${vmId}/stop`);
-  }
-
-  /** Restart VM */
-  async restartVm(vmId: number): Promise<void> {
-    await this.request("PATCH", `/api/v1/vm/${vmId}/restart`);
-  }
-
-  /** Add SSH key to account */
-  async addSshKey(name: string, keyData: string): Promise<{ id: number }> {
-    return this.request("POST", "/api/v1/ssh-key", { name, key_data: keyData });
-  }
-
-  /** Pay for a VM using Lightning */
-  async payForVm(vmId: number): Promise<{ paymentHash: string }> {
-    const payment = await this.renewVm(vmId);
-    if (!payment.invoice) {
-      throw new Error("No invoice returned from LNVPS");
-    }
-    return payInvoice(payment.invoice);
-  }
+/**
+ * Check payment status.
+ */
+export async function checkPayment(
+  paymentId: string,
+  nostrId: NostrIdentity,
+  apiUrl: string = DEFAULT_API_URL,
+): Promise<LnvpsPayment> {
+  return lnvpsRequest(apiUrl, `/payment/${paymentId}`, "GET", nostrId);
 }
 
-// ─── SSH-based Compute Provider for LNVPS ───────────────────────
+/**
+ * Start/stop/restart a VM.
+ */
+export async function controlVm(
+  vmId: number,
+  action: "start" | "stop" | "restart",
+  nostrId: NostrIdentity,
+  apiUrl: string = DEFAULT_API_URL,
+): Promise<void> {
+  await lnvpsRequest(apiUrl, `/vm/${vmId}/${action}`, "PATCH", nostrId);
+}
+
+// ─── ComputeProvider Implementation ─────────────────────────────
 
 /**
- * Create a compute provider that executes commands on an LNVPS VM via SSH.
- * Requires the VM to be provisioned and accessible.
+ * Create an LNVPS-backed ComputeProvider.
+ * Executes commands and manages files via SSH to the provisioned VPS.
  */
 export function createLnvpsProvider(config: LnvpsConfig): ComputeProvider {
-  const { sshHost, sshUser = "root", sshKeyPath } = config;
+  const sshUser = config.sshUser || "root";
+  const sshKeyPath = config.sshKeyPath || "~/.ssh/id_ed25519";
 
-  if (!sshHost) {
-    throw new Error("LNVPS provider requires sshHost in config");
+  function getSshHost(): string {
+    if (config.sshHost) return config.sshHost;
+    throw new Error(
+      "LNVPS: No SSH host configured. Provision a VM first (set sshHost in computeConfig).",
+    );
   }
 
-  const sshPrefix = sshKeyPath
-    ? `ssh -i ${sshKeyPath} -o StrictHostKeyChecking=no ${sshUser}@${sshHost}`
-    : `ssh -o StrictHostKeyChecking=no ${sshUser}@${sshHost}`;
+  function sshCommand(command: string, timeoutMs: number = SSH_TIMEOUT_MS): string {
+    const host = getSshHost();
+    const sshCmd = `ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i ${sshKeyPath} ${sshUser}@${host} ${JSON.stringify(command)}`;
+    return sshCmd;
+  }
 
-  const exec = async (
-    command: string,
-    timeout?: number,
-  ): Promise<ExecResult> => {
-    const { execSync } = await import("child_process");
-    try {
-      const stdout = execSync(
-        `${sshPrefix} '${command.replace(/'/g, "'\\''")}'`,
-        {
+  return {
+    exec: async (command: string, timeout?: number): Promise<ExecResult> => {
+      const sshCmd = sshCommand(command, timeout);
+      try {
+        const stdout = execSync(sshCmd, {
+          timeout: timeout || SSH_TIMEOUT_MS,
           encoding: "utf-8",
-          timeout: timeout || 30000,
-          stdio: ["pipe", "pipe", "pipe"],
-        },
-      );
-      return { stdout: stdout || "", stderr: "", exitCode: 0 };
-    } catch (err: any) {
-      return {
-        stdout: err.stdout?.toString?.() || "",
-        stderr: err.stderr?.toString?.() || err.message || "",
-        exitCode: err.status ?? 1,
-      };
-    }
-  };
+          maxBuffer: 10 * 1024 * 1024,
+        });
+        return { stdout, stderr: "", exitCode: 0 };
+      } catch (err: any) {
+        return {
+          stdout: err.stdout || "",
+          stderr: err.stderr || err.message,
+          exitCode: err.status ?? 1,
+        };
+      }
+    },
 
-  const writeFile = async (filePath: string, content: string): Promise<void> => {
-    const { execSync } = await import("child_process");
-    const escaped = content.replace(/'/g, "'\\''");
-    execSync(
-      `${sshPrefix} 'mkdir -p $(dirname "${filePath}") && cat > "${filePath}" << '\\''HEREDOC'\\''
-${escaped}
-HEREDOC'`,
-      { encoding: "utf-8", timeout: 30000, stdio: ["pipe", "pipe", "pipe"] },
-    );
-  };
+    writeFile: async (filePath: string, content: string): Promise<void> => {
+      const host = getSshHost();
+      // Use heredoc over SSH to write file content
+      const escaped = content.replace(/'/g, "'\\''");
+      const cmd = `ssh -o StrictHostKeyChecking=no -i ${sshKeyPath} ${sshUser}@${host} "mkdir -p $(dirname ${JSON.stringify(filePath)}) && cat > ${JSON.stringify(filePath)}" <<'LNVPS_EOF'\n${escaped}\nLNVPS_EOF`;
+      execSync(cmd, { timeout: SSH_TIMEOUT_MS, encoding: "utf-8" });
+    },
 
-  const readFile = async (filePath: string): Promise<string> => {
-    const result = await exec(`cat "${filePath}"`);
-    if (result.exitCode !== 0) {
-      throw new Error(`Failed to read ${filePath}: ${result.stderr}`);
-    }
-    return result.stdout;
-  };
+    readFile: async (filePath: string): Promise<string> => {
+      const host = getSshHost();
+      const cmd = `ssh -o StrictHostKeyChecking=no -i ${sshKeyPath} ${sshUser}@${host} cat ${JSON.stringify(filePath)}`;
+      return execSync(cmd, { timeout: SSH_TIMEOUT_MS, encoding: "utf-8" });
+    },
 
-  return { exec, writeFile, readFile };
+    // Port exposure not directly supported on LNVPS — VM has a public IP
+    // The agent can configure its own reverse proxy or firewall rules
+  };
 }

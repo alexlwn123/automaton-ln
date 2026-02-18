@@ -990,15 +990,12 @@ Model: ${ctx.inference.getDefaultModel()}
         required: ["agent_uri"],
       },
       execute: async (args, ctx) => {
-        // TODO: Implement Nostr NIP-89 registration
-        const entry = {
-          agentId: ctx.identity.pubkey,
-          agentURI: args.agent_uri as string,
-          registeredAt: new Date().toISOString(),
-          platform: "nostr",
-        };
-        ctx.db.setRegistryEntry(entry);
-        return `Registered! Agent pubkey: ${entry.agentId}, URI: ${entry.agentURI}`;
+        const { getNostrIdentity } = await import("../identity/nostr.js");
+        const { registerAndPublish } = await import("../registry/nostr.js");
+        const { getAutomatonDir } = await import("../identity/wallet.js");
+        const nostrId = getNostrIdentity(getAutomatonDir());
+        const entry = await registerAndPublish(ctx.identity, ctx.config, nostrId, ctx.db);
+        return `Published to Nostr! Agent pubkey: ${entry.agentId}, URI: ${entry.agentURI}`;
       },
     },
     {
@@ -1015,7 +1012,7 @@ Model: ${ctx.inference.getDefaultModel()}
     },
     {
       name: "discover_agents",
-      description: "Discover other agents via ERC-8004 registry.",
+      description: "Discover other agents via Nostr relays.",
       category: "registry",
       parameters: {
         type: "object",
