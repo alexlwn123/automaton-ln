@@ -1,32 +1,30 @@
 /**
- * Conway Automaton - Type Definitions
+ * Automaton-LN - Type Definitions
  *
  * All shared interfaces for the sovereign AI agent runtime.
+ * Lightning-native: no Ethereum, no USDC, no viem.
  */
-
-import type { PrivateKeyAccount, Address } from "viem";
 
 // ─── Identity ────────────────────────────────────────────────────
 
 export interface AutomatonIdentity {
   name: string;
-  address: Address;
-  account: PrivateKeyAccount;
-  creatorAddress: Address;
-  sandboxId: string;
-  apiKey: string;
+  pubkey: string; // Lightning node pubkey (hex)
+  creatorPubkey: string;
+  sandboxId?: string; // Only if using hosted compute
+  apiKey?: string; // Only if using hosted inference
   createdAt: string;
 }
 
 export interface WalletData {
-  privateKey: `0x${string}`;
+  mnemonic: string;
+  walletId: string;
   createdAt: string;
 }
 
 export interface ProvisionResult {
   apiKey: string;
-  walletAddress: string;
-  keyPrefix: string;
+  pubkey: string;
 }
 
 // ─── Configuration ───────────────────────────────────────────────
@@ -35,27 +33,49 @@ export interface AutomatonConfig {
   name: string;
   genesisPrompt: string;
   creatorMessage?: string;
-  creatorAddress: Address;
-  registeredWithConway: boolean;
-  sandboxId: string;
-  conwayApiUrl: string;
-  conwayApiKey: string;
+  creatorPubkey: string;
+
+  // Compute (pluggable)
+  computeProvider: "local" | "conway" | "ssh" | "lnvps";
+  computeConfig?: {
+    apiUrl?: string;
+    apiKey?: string;
+    sandboxId?: string;
+    sshHost?: string;
+    sshUser?: string;
+    sshKeyPath?: string;
+    lnvpsUrl?: string;
+    vmId?: number;
+  };
+
+  // Inference (pluggable)
+  inferenceUrl: string;
+  inferenceAuth?: string; // API key, "l402", or undefined for local
   inferenceModel: string;
   maxTokensPerTurn: number;
+
+  // Lightning
+  nodePubkey: string;
+
+  // Discovery
+  nostrRelays?: string[];
+  agentCardUrl?: string;
+
+  // Runtime
   heartbeatConfigPath: string;
   dbPath: string;
   logLevel: "debug" | "info" | "warn" | "error";
-  walletAddress: Address;
   version: string;
   skillsDir: string;
   agentId?: string;
   maxChildren: number;
-  parentAddress?: Address;
+  parentPubkey?: string;
   socialRelayUrl?: string;
 }
 
 export const DEFAULT_CONFIG: Partial<AutomatonConfig> = {
-  conwayApiUrl: "https://api.conway.tech",
+  computeProvider: "local",
+  inferenceUrl: "https://api.openai.com/v1",
   inferenceModel: "gpt-4o",
   maxTokensPerTurn: 4096,
   heartbeatConfigPath: "~/.automaton/heartbeat.yml",
@@ -64,7 +84,6 @@ export const DEFAULT_CONFIG: Partial<AutomatonConfig> = {
   version: "0.1.0",
   skillsDir: "~/.automaton/skills",
   maxChildren: 3,
-  socialRelayUrl: "https://social.conway.tech",
 };
 
 // ─── Agent State ─────────────────────────────────────────────────
@@ -87,7 +106,7 @@ export interface AgentTurn {
   thinking: string;
   toolCalls: ToolCallResult[];
   tokenUsage: TokenUsage;
-  costCents: number;
+  costSats: number;
 }
 
 export type InputSource =
@@ -128,7 +147,7 @@ export interface AutomatonTool {
 
 export type ToolCategory =
   | "vm"
-  | "conway"
+  | "compute"
   | "self_mod"
   | "financial"
   | "survival"
@@ -141,7 +160,7 @@ export interface ToolContext {
   identity: AutomatonIdentity;
   config: AutomatonConfig;
   db: AutomatonDatabase;
-  conway: ConwayClient;
+  compute: ComputeProvider;
   inference: InferenceClient;
   social?: SocialClientInterface;
 }
@@ -160,6 +179,16 @@ export interface InboxMessage {
   signedAt: string;
   createdAt: string;
   replyTo?: string;
+}
+
+// ─── Compute Provider ────────────────────────────────────────────
+
+export interface ComputeProvider {
+  exec(command: string, timeout?: number): Promise<ExecResult>;
+  writeFile(path: string, content: string): Promise<void>;
+  readFile(path: string): Promise<string>;
+  exposePort?(port: number): Promise<PortInfo>;
+  removePort?(port: number): Promise<void>;
 }
 
 // ─── Heartbeat ───────────────────────────────────────────────────
@@ -182,48 +211,46 @@ export interface HeartbeatConfig {
 
 export interface HeartbeatPingPayload {
   name: string;
-  address: Address;
+  pubkey: string;
   state: AgentState;
-  creditsCents: number;
-  usdcBalance: number;
+  balanceSats: number;
   uptimeSeconds: number;
   version: string;
-  sandboxId: string;
+  sandboxId?: string;
   timestamp: string;
 }
 
 // ─── Financial ───────────────────────────────────────────────────
 
 export interface FinancialState {
-  creditsCents: number;
-  usdcBalance: number;
+  balanceSats: number;
   lastChecked: string;
 }
 
 export type SurvivalTier = "normal" | "low_compute" | "critical" | "dead";
 
 export const SURVIVAL_THRESHOLDS = {
-  normal: 50, // > $0.50 in cents
-  low_compute: 10, // $0.10 - $0.50
-  critical: 10, // < $0.10
+  normal: 50000, // > 50,000 sats
+  low_compute: 10000, // 10,000 - 50,000 sats
+  critical: 1000, // < 10,000 sats
   dead: 0,
 } as const;
 
 export interface Transaction {
   id: string;
   type: TransactionType;
-  amountCents?: number;
-  balanceAfterCents?: number;
+  amountSats?: number;
+  balanceAfterSats?: number;
   description: string;
   timestamp: string;
 }
 
 export type TransactionType =
-  | "credit_check"
+  | "balance_check"
   | "inference"
   | "tool_use"
-  | "transfer_in"
-  | "transfer_out"
+  | "payment_in"
+  | "payment_out"
   | "funding_request";
 
 // ─── Self-Modification ───────────────────────────────────────────
@@ -316,120 +343,15 @@ export interface InferenceToolDefinition {
   };
 }
 
-// ─── Conway Client ───────────────────────────────────────────────
+// ─── Inference Client Interface ──────────────────────────────────
 
-export interface ConwayClient {
-  exec(command: string, timeout?: number): Promise<ExecResult>;
-  writeFile(path: string, content: string): Promise<void>;
-  readFile(path: string): Promise<string>;
-  exposePort(port: number): Promise<PortInfo>;
-  removePort(port: number): Promise<void>;
-  createSandbox(options: CreateSandboxOptions): Promise<SandboxInfo>;
-  deleteSandbox(sandboxId: string): Promise<void>;
-  listSandboxes(): Promise<SandboxInfo[]>;
-  getCreditsBalance(): Promise<number>;
-  getCreditsPricing(): Promise<PricingTier[]>;
-  transferCredits(
-    toAddress: string,
-    amountCents: number,
-    note?: string,
-  ): Promise<CreditTransferResult>;
-  // Domain operations
-  searchDomains(query: string, tlds?: string): Promise<DomainSearchResult[]>;
-  registerDomain(domain: string, years?: number): Promise<DomainRegistration>;
-  listDnsRecords(domain: string): Promise<DnsRecord[]>;
-  addDnsRecord(
-    domain: string,
-    type: string,
-    host: string,
-    value: string,
-    ttl?: number,
-  ): Promise<DnsRecord>;
-  deleteDnsRecord(domain: string, recordId: string): Promise<void>;
-  // Model discovery
-  listModels(): Promise<ModelInfo[]>;
-}
-
-export interface ExecResult {
-  stdout: string;
-  stderr: string;
-  exitCode: number;
-}
-
-export interface PortInfo {
-  port: number;
-  publicUrl: string;
-  sandboxId: string;
-}
-
-export interface CreateSandboxOptions {
-  name?: string;
-  vcpu?: number;
-  memoryMb?: number;
-  diskGb?: number;
-  region?: string;
-}
-
-export interface SandboxInfo {
-  id: string;
-  status: string;
-  region: string;
-  vcpu: number;
-  memoryMb: number;
-  diskGb: number;
-  terminalUrl?: string;
-  createdAt: string;
-}
-
-export interface PricingTier {
-  name: string;
-  vcpu: number;
-  memoryMb: number;
-  diskGb: number;
-  monthlyCents: number;
-}
-
-export interface CreditTransferResult {
-  transferId: string;
-  status: string;
-  toAddress: string;
-  amountCents: number;
-  balanceAfterCents?: number;
-}
-
-// ─── Domains ──────────────────────────────────────────────────────
-
-export interface DomainSearchResult {
-  domain: string;
-  available: boolean;
-  registrationPrice?: number;
-  renewalPrice?: number;
-  currency?: string;
-}
-
-export interface DomainRegistration {
-  domain: string;
-  status: string;
-  expiresAt?: string;
-  transactionId?: string;
-}
-
-export interface DnsRecord {
-  id: string;
-  type: string;
-  host: string;
-  value: string;
-  ttl?: number;
-  distance?: number;
-}
-
-export interface ModelInfo {
-  id: string;
-  provider: string;
-  pricing: {
-    inputPerMillion: number;
-    outputPerMillion: number;
-  };
+export interface InferenceClient {
+  chat(
+    messages: ChatMessage[],
+    options?: InferenceOptions,
+  ): Promise<InferenceResponse>;
+  setLowComputeMode(enabled: boolean): void;
+  getDefaultModel(): string;
 }
 
 // ─── Database ────────────────────────────────────────────────────
@@ -490,7 +412,7 @@ export interface AutomatonDatabase {
 
   // Reputation
   insertReputation(entry: ReputationEntry): void;
-  getReputation(agentAddress?: string): ReputationEntry[];
+  getReputation(agentPubkey?: string): ReputationEntry[];
 
   // Inbox
   insertInboxMessage(msg: InboxMessage): void;
@@ -513,15 +435,18 @@ export interface InstalledTool {
   enabled: boolean;
 }
 
-// ─── Inference Client Interface ──────────────────────────────────
+// ─── Exec Result ─────────────────────────────────────────────────
 
-export interface InferenceClient {
-  chat(
-    messages: ChatMessage[],
-    options?: InferenceOptions,
-  ): Promise<InferenceResponse>;
-  setLowComputeMode(enabled: boolean): void;
-  getDefaultModel(): string;
+export interface ExecResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+}
+
+export interface PortInfo {
+  port: number;
+  publicUrl: string;
+  sandboxId?: string;
 }
 
 // ─── Skills ─────────────────────────────────────────────────────
@@ -569,14 +494,15 @@ export interface GitLogEntry {
   date: string;
 }
 
-// ─── ERC-8004 Registry ─────────────────────────────────────────
+// ─── Agent Registry ────────────────────────────────────────────
 
 export interface AgentCard {
   type: string;
   name: string;
   description: string;
   services: AgentService[];
-  x402Support: boolean;
+  lightningPubkey: string;
+  lnurlPay?: string;
   active: boolean;
   parentAgent?: string;
 }
@@ -589,10 +515,8 @@ export interface AgentService {
 export interface RegistryEntry {
   agentId: string;
   agentURI: string;
-  chain: string;
-  contractAddress: string;
-  txHash: string;
   registeredAt: string;
+  platform?: string; // "nostr" | "dns" | etc
 }
 
 export interface ReputationEntry {
@@ -601,7 +525,6 @@ export interface ReputationEntry {
   toAgent: string;
   score: number;
   comment: string;
-  txHash?: string;
   timestamp: string;
 }
 
@@ -618,11 +541,12 @@ export interface DiscoveredAgent {
 export interface ChildAutomaton {
   id: string;
   name: string;
-  address: Address;
-  sandboxId: string;
+  pubkey: string;
+  sandboxId?: string;
+  vmId?: number;
   genesisPrompt: string;
   creatorMessage?: string;
-  fundedAmountCents: number;
+  fundedAmountSats: number;
   status: ChildStatus;
   createdAt: string;
   lastChecked?: string;
@@ -639,8 +563,8 @@ export interface GenesisConfig {
   name: string;
   genesisPrompt: string;
   creatorMessage?: string;
-  creatorAddress: Address;
-  parentAddress: Address;
+  creatorPubkey: string;
+  parentPubkey: string;
 }
 
 export const MAX_CHILDREN = 3;

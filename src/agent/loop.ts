@@ -9,7 +9,7 @@ import type {
   AutomatonIdentity,
   AutomatonConfig,
   AutomatonDatabase,
-  ConwayClient,
+  ComputeProvider,
   InferenceClient,
   AgentState,
   AgentTurn,
@@ -27,8 +27,9 @@ import {
   toolsToInferenceFormat,
   executeTool,
 } from "./tools.js";
-import { getSurvivalTier } from "../conway/credits.js";
-import { getUsdcBalance } from "../conway/x402.js";
+import { getSurvivalTier, formatBalance } from "../lightning/balance.js";
+import { getBalance } from "../lightning/payments.js";
+
 import { ulid } from "ulid";
 
 const MAX_TOOL_CALLS_PER_TURN = 10;
@@ -38,7 +39,7 @@ export interface AgentLoopOptions {
   identity: AutomatonIdentity;
   config: AutomatonConfig;
   db: AutomatonDatabase;
-  conway: ConwayClient;
+  compute: ComputeProvider;
   inference: InferenceClient;
   social?: SocialClientInterface;
   skills?: Skill[];
@@ -53,15 +54,15 @@ export interface AgentLoopOptions {
 export async function runAgentLoop(
   options: AgentLoopOptions,
 ): Promise<void> {
-  const { identity, config, db, conway, inference, social, skills, onStateChange, onTurnComplete } =
+  const { identity, config, db, compute, inference, social, skills, onStateChange, onTurnComplete } =
     options;
 
-  const tools = createBuiltinTools(identity.sandboxId);
+  const tools = createBuiltinTools(identity.sandboxId || "local");
   const toolContext: ToolContext = {
     identity,
     config,
     db,
-    conway,
+    compute,
     inference,
     social,
   };
@@ -79,7 +80,7 @@ export async function runAgentLoop(
   onStateChange?.("waking");
 
   // Get financial state
-  let financial = await getFinancialState(conway, identity.address);
+  let financial = await getFinancialState();
 
   // Check if this is the first run
   const isFirstRun = db.getTurnCount() === 0;
@@ -96,7 +97,7 @@ export async function runAgentLoop(
   db.setAgentState("running");
   onStateChange?.("running");
 
-  log(config, `[WAKE UP] ${config.name} is alive. Credits: $${(financial.creditsCents / 100).toFixed(2)}`);
+  log(config, `[WAKE UP] ${config.name} is alive. Balance: ${formatBalance(financial.balanceSats)}`);
 
   // ─── The Loop ──────────────────────────────────────────────
 
@@ -130,10 +131,10 @@ export async function runAgentLoop(
       }
 
       // Refresh financial state periodically
-      financial = await getFinancialState(conway, identity.address);
+      financial = await getFinancialState();
 
       // Check survival tier
-      const tier = getSurvivalTier(financial.creditsCents);
+      const tier = getSurvivalTier(financial.balanceSats);
       if (tier === "dead") {
         log(config, "[DEAD] No credits remaining. Entering dead state.");
         db.setAgentState("dead");
@@ -200,7 +201,7 @@ export async function runAgentLoop(
         thinking: response.message.content || "",
         toolCalls: [],
         tokenUsage: response.usage,
-        costCents: estimateCostCents(response.usage, inference.getDefaultModel()),
+        costSats: estimateCostCents(response.usage, inference.getDefaultModel()),
       };
 
       // ── Execute Tool Calls ──
@@ -308,24 +309,13 @@ export async function runAgentLoop(
 
 // ─── Helpers ───────────────────────────────────────────────────
 
-async function getFinancialState(
-  conway: ConwayClient,
-  address: string,
-): Promise<FinancialState> {
-  let creditsCents = 0;
-  let usdcBalance = 0;
-
+async function getFinancialState(): Promise<FinancialState> {
+  let balanceSats = 0;
   try {
-    creditsCents = await conway.getCreditsBalance();
+    balanceSats = await getBalance();
   } catch {}
-
-  try {
-    usdcBalance = await getUsdcBalance(address as `0x${string}`);
-  } catch {}
-
   return {
-    creditsCents,
-    usdcBalance,
+    balanceSats,
     lastChecked: new Date().toISOString(),
   };
 }

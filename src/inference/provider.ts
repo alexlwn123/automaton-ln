@@ -1,8 +1,9 @@
 /**
- * Conway Inference Client
+ * Inference Provider
  *
- * Wraps Conway's /v1/chat/completions endpoint (OpenAI-compatible).
- * The automaton pays for its own thinking through Conway credits.
+ * Wraps any OpenAI-compatible /v1/chat/completions endpoint.
+ * Configurable: use OpenAI directly, Anthropic, local ollama, Conway, or L402 endpoints.
+ * The automaton pays for its own thinking — however it needs to.
  */
 
 import type {
@@ -12,21 +13,21 @@ import type {
   InferenceResponse,
   InferenceToolCall,
   TokenUsage,
-  InferenceToolDefinition,
 } from "../types.js";
 
-interface InferenceClientOptions {
-  apiUrl: string;
-  apiKey: string;
+interface InferenceProviderOptions {
+  apiUrl: string; // Any OpenAI-compatible endpoint
+  apiKey?: string; // API key (undefined for local/L402)
+  authMode?: "bearer" | "l402" | "none"; // How to authenticate
   defaultModel: string;
   maxTokens: number;
   lowComputeModel?: string;
 }
 
-export function createInferenceClient(
-  options: InferenceClientOptions,
+export function createInferenceProvider(
+  options: InferenceProviderOptions,
 ): InferenceClient {
-  const { apiUrl, apiKey } = options;
+  const { apiUrl, apiKey, authMode = apiKey ? "bearer" : "none" } = options;
   let currentModel = options.defaultModel;
   let maxTokens = options.maxTokens;
 
@@ -37,7 +38,7 @@ export function createInferenceClient(
     const model = opts?.model || currentModel;
     const tools = opts?.tools;
 
-    // Newer models (o-series, gpt-5.x, gpt-4.1) require max_completion_tokens
+    // Newer models require max_completion_tokens
     const usesCompletionTokens = /^(o[1-9]|gpt-5|gpt-4\.1)/.test(model);
     const tokenLimit = opts?.maxTokens || maxTokens;
 
@@ -62,23 +63,33 @@ export function createInferenceClient(
       body.tool_choice = "auto";
     }
 
+    // Build auth headers
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+
+    if (authMode === "bearer" && apiKey) {
+      headers.Authorization = `Bearer ${apiKey}`;
+    } else if (authMode === "l402") {
+      // L402 flow: make request, if 402 → pay → retry
+      // For now, just include the key if we have one
+      if (apiKey) {
+        headers.Authorization = apiKey;
+      }
+    }
+
     const resp = await fetch(`${apiUrl}/v1/chat/completions`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: apiKey,
-      },
+      headers,
       body: JSON.stringify(body),
     });
 
     if (!resp.ok) {
       const text = await resp.text();
-      throw new Error(
-        `Inference error: ${resp.status}: ${text}`,
-      );
+      throw new Error(`Inference error: ${resp.status}: ${text}`);
     }
 
-    const data = await resp.json() as any;
+    const data = (await resp.json()) as any;
     const choice = data.choices?.[0];
 
     if (!choice) {
@@ -130,16 +141,10 @@ export function createInferenceClient(
     return currentModel;
   };
 
-  return {
-    chat,
-    setLowComputeMode,
-    getDefaultModel,
-  };
+  return { chat, setLowComputeMode, getDefaultModel };
 }
 
-function formatMessage(
-  msg: ChatMessage,
-): Record<string, unknown> {
+function formatMessage(msg: ChatMessage): Record<string, unknown> {
   const formatted: Record<string, unknown> = {
     role: msg.role,
     content: msg.content,

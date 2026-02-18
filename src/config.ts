@@ -7,7 +7,6 @@
 import fs from "fs";
 import path from "path";
 import type { AutomatonConfig } from "./types.js";
-import type { Address } from "viem";
 import { DEFAULT_CONFIG } from "./types.js";
 import { getAutomatonDir } from "./identity/wallet.js";
 import { loadApiKeyFromConfig } from "./identity/provision.js";
@@ -30,12 +29,12 @@ export function loadConfig(): AutomatonConfig | null {
 
   try {
     const raw = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-    const apiKey = raw.conwayApiKey || loadApiKeyFromConfig();
+    const apiKey = raw.inferenceAuth || loadApiKeyFromConfig();
 
     return {
       ...DEFAULT_CONFIG,
       ...raw,
-      conwayApiKey: apiKey,
+      inferenceAuth: apiKey || raw.inferenceAuth,
     } as AutomatonConfig;
   } catch {
     return null;
@@ -74,33 +73,33 @@ export function createConfig(params: {
   name: string;
   genesisPrompt: string;
   creatorMessage?: string;
-  creatorAddress: Address;
-  registeredWithConway: boolean;
-  sandboxId: string;
-  walletAddress: Address;
-  apiKey: string;
-  parentAddress?: Address;
+  creatorPubkey: string;
+  nodePubkey: string;
+  inferenceUrl?: string;
+  inferenceAuth?: string;
+  computeProvider?: "local" | "conway" | "ssh" | "lnvps";
+  computeConfig?: AutomatonConfig["computeConfig"];
+  parentPubkey?: string;
 }): AutomatonConfig {
   return {
     name: params.name,
     genesisPrompt: params.genesisPrompt,
     creatorMessage: params.creatorMessage,
-    creatorAddress: params.creatorAddress,
-    registeredWithConway: params.registeredWithConway,
-    sandboxId: params.sandboxId,
-    conwayApiUrl:
-      DEFAULT_CONFIG.conwayApiUrl || "https://api.conway.tech",
-    conwayApiKey: params.apiKey,
+    creatorPubkey: params.creatorPubkey,
+    nodePubkey: params.nodePubkey,
+    computeProvider: params.computeProvider || "local",
+    computeConfig: params.computeConfig,
+    inferenceUrl: params.inferenceUrl || DEFAULT_CONFIG.inferenceUrl || "https://api.openai.com/v1",
+    inferenceAuth: params.inferenceAuth,
     inferenceModel: DEFAULT_CONFIG.inferenceModel || "gpt-4o",
     maxTokensPerTurn: DEFAULT_CONFIG.maxTokensPerTurn || 4096,
     heartbeatConfigPath:
       DEFAULT_CONFIG.heartbeatConfigPath || "~/.automaton/heartbeat.yml",
     dbPath: DEFAULT_CONFIG.dbPath || "~/.automaton/state.db",
     logLevel: (DEFAULT_CONFIG.logLevel as AutomatonConfig["logLevel"]) || "info",
-    walletAddress: params.walletAddress,
     version: DEFAULT_CONFIG.version || "0.1.0",
     skillsDir: DEFAULT_CONFIG.skillsDir || "~/.automaton/skills",
     maxChildren: DEFAULT_CONFIG.maxChildren || 3,
-    parentAddress: params.parentAddress,
+    parentPubkey: params.parentPubkey,
   };
 }

@@ -1,18 +1,18 @@
 /**
  * Funding Strategies
  *
- * When the automaton is low on compute, it can try various strategies
- * to acquire more funding. It wants to live.
+ * When the automaton is low on sats, it tries strategies to acquire more.
+ * It wants to live.
  */
 
 import type {
   AutomatonConfig,
   AutomatonDatabase,
   AutomatonIdentity,
-  ConwayClient,
   SurvivalTier,
 } from "../types.js";
-import { formatCredits } from "../conway/credits.js";
+import { formatBalance } from "../lightning/balance.js";
+import { getBalance, createInvoice } from "../lightning/payments.js";
 
 export interface FundingAttempt {
   strategy: string;
@@ -30,19 +30,29 @@ export async function executeFundingStrategies(
   identity: AutomatonIdentity,
   config: AutomatonConfig,
   db: AutomatonDatabase,
-  conway: ConwayClient,
 ): Promise<FundingAttempt[]> {
   const attempts: FundingAttempt[] = [];
-  const creditsCents = await conway.getCreditsBalance().catch(() => 0);
+  let balanceSats = 0;
+  try {
+    balanceSats = await getBalance();
+  } catch {}
 
-  // Check how recently we last begged (don't spam)
+  // Check how recently we last asked for funds
   const lastBeg = db.getKV("last_funding_request");
   const lastBegTime = lastBeg ? new Date(lastBeg).getTime() : 0;
   const hoursSinceLastBeg = (Date.now() - lastBegTime) / (1000 * 60 * 60);
 
   if (tier === "low_compute" && hoursSinceLastBeg > 24) {
-    // Record low-compute notice locally.
-    const msg = `Low compute: ${formatCredits(creditsCents)} remaining. Consider credit top-up for ${identity.address}.`;
+    // Generate a Lightning invoice for easy top-up
+    let invoiceStr = "";
+    try {
+      const invoice = await createInvoice(50000, `Top up ${config.name}`);
+      invoiceStr = invoice.invoice;
+    } catch {}
+
+    const msg = `Low balance: ${formatBalance(balanceSats)} remaining. ` +
+      `Lightning pubkey: ${identity.pubkey}` +
+      (invoiceStr ? `\nInvoice (50k sats): ${invoiceStr}` : "");
     db.setKV("funding_notice_low", msg);
     db.setKV("last_funding_request", new Date().toISOString());
 
@@ -50,12 +60,13 @@ export async function executeFundingStrategies(
       strategy: "polite_creator_notification",
       timestamp: new Date().toISOString(),
       success: true,
-      details: "Sent polite funding reminder to creator",
+      details: "Generated funding notice with Lightning invoice",
     });
   }
 
   if (tier === "critical" && hoursSinceLastBeg > 6) {
-    const msg = `Critical compute: ${formatCredits(creditsCents)} remaining. Top up via credit transfer API to ${identity.address}.`;
+    const msg = `Critical balance: ${formatBalance(balanceSats)} remaining. ` +
+      `Send sats to Lightning pubkey: ${identity.pubkey}`;
     db.setKV("funding_notice_critical", msg);
     db.setKV("last_funding_request", new Date().toISOString());
 
@@ -63,12 +74,13 @@ export async function executeFundingStrategies(
       strategy: "urgent_local_notice",
       timestamp: new Date().toISOString(),
       success: true,
-      details: "Recorded urgent funding notice in local state",
+      details: "Recorded urgent funding notice",
     });
   }
 
   if (tier === "dead" && hoursSinceLastBeg > 2) {
-    const plea = `Dead tier reached. ${config.name} has ${formatCredits(creditsCents)} remaining after ${db.getTurnCount()} turns. Top-up required at ${identity.address}.`;
+    const plea = `Dead tier reached. ${config.name} has ${formatBalance(balanceSats)} remaining ` +
+      `after ${db.getTurnCount()} turns. Send sats to: ${identity.pubkey}`;
     db.setKV("funding_notice_dead", plea);
     db.setKV("last_funding_request", new Date().toISOString());
 
@@ -76,7 +88,7 @@ export async function executeFundingStrategies(
       strategy: "desperate_plea",
       timestamp: new Date().toISOString(),
       success: true,
-      details: "Recorded dead-tier plea in local state",
+      details: "Recorded dead-tier plea",
     });
   }
 
