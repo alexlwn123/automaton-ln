@@ -189,6 +189,44 @@ export function createBuiltinTools(sandboxId: string): AutomatonTool[] {
       },
     },
 
+    {
+      name: "create_invoice",
+      description: "Create a Lightning invoice (BOLT11) to receive payment. Share this with anyone who wants to pay you.",
+      category: "financial",
+      parameters: {
+        type: "object",
+        properties: {
+          amount_sats: { type: "number", description: "Amount in sats to request" },
+          memo: { type: "string", description: "Description/memo for the invoice" },
+        },
+        required: ["amount_sats"],
+      },
+      execute: async (args, _ctx) => {
+        const { createInvoice } = await import("../lightning/payments.js");
+        const invoice = await createInvoice(
+          args.amount_sats as number,
+          args.memo as string | undefined,
+        );
+        return `Invoice created:\n  BOLT11: ${invoice.invoice}\n  Payment hash: ${invoice.paymentHash}\n  Expires: ${invoice.expiresAt}`;
+      },
+    },
+    {
+      name: "get_funding_info",
+      description: "Get your Lightning funding info to share with your creator or anyone who wants to support you.",
+      category: "financial",
+      parameters: { type: "object", properties: {} },
+      execute: async (_args, ctx) => {
+        return `=== FUNDING INFO ===
+Name: ${ctx.config.name}
+Lightning pubkey: ${ctx.identity.pubkey}
+
+To fund this agent:
+1. Pay a BOLT11 invoice (use create_invoice to generate one)
+2. Keysend sats to pubkey: ${ctx.identity.pubkey}
+========================`;
+      },
+    },
+
     // ── Self-Modification Tools ──
     {
       name: "edit_own_file",
