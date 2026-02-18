@@ -113,7 +113,8 @@ export function createHeartbeatDaemon(
     // Check survival tier to adjust behavior
     let balanceSats = 0;
     try {
-      balanceSats = await conway.getBalance();
+      const { getBalance } = await import("../lightning/payments.js");
+      balanceSats = await getBalance();
     } catch {}
 
     const tier = getSurvivalTier(balanceSats);

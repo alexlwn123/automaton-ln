@@ -62,7 +62,7 @@ export function generateAgentCard(
     name: config.name,
     description,
     services,
-    lightningPubkey: true,
+    lightningPubkey: identity.pubkey,
     active: true,
     parentAgent: config.parentPubkey || config.creatorPubkey,
   };
@@ -113,6 +113,7 @@ server.listen(${port}, () => console.log('Agent card server on port ${port}'));
   );
 
   // Expose port
+  if (!conway.exposePort) throw new Error("Port exposure not supported by current compute provider.");
   const portInfo = await conway.exposePort(port);
 
   return `${portInfo.publicUrl}/.well-known/agent-card.json`;

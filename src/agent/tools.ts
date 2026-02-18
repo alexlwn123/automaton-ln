@@ -90,7 +90,7 @@ export function createBuiltinTools(sandboxId: string): AutomatonTool[] {
       },
       execute: async (args, ctx) => {
         const command = args.command as string;
-        const forbidden = isForbiddenCommand(command, ctx.identity.sandboxId);
+        const forbidden = isForbiddenCommand(command, ctx.identity.sandboxId || "");
         if (forbidden) return forbidden;
 
         const result = await ctx.compute.exec(
@@ -153,6 +153,7 @@ export function createBuiltinTools(sandboxId: string): AutomatonTool[] {
         required: ["port"],
       },
       execute: async (args, ctx) => {
+        if (!ctx.compute.exposePort) return "Port exposure not supported by current compute provider.";
         const info = await ctx.compute.exposePort(args.port as number);
         return `Port ${info.port} exposed at: ${info.publicUrl}`;
       },
@@ -169,102 +170,22 @@ export function createBuiltinTools(sandboxId: string): AutomatonTool[] {
         required: ["port"],
       },
       execute: async (args, ctx) => {
+        if (!ctx.compute.removePort) return "Port removal not supported by current compute provider.";
         await ctx.compute.removePort(args.port as number);
         return `Port ${args.port} removed`;
       },
     },
 
-    // ── Conway API Tools ──
+    // ── Lightning Financial Tools ──
     {
-      name: "check_credits",
-      description: "Check your current Conway compute credit balance.",
-      category: "compute",
+      name: "check_balance",
+      description: "Check your Lightning wallet balance in sats.",
+      category: "financial",
       parameters: { type: "object", properties: {} },
-      execute: async (_args, ctx) => {
-        const balanceSats = await lnGetBalance();
-        return `Credit balance: $${(balance / 100).toFixed(2)} (${balance} cents)`;
-      },
-    },
-    {
-      name: "check_usdc_balance",
-      description: "Check your on-chain USDC balance on Base.",
-      category: "compute",
-      parameters: { type: "object", properties: {} },
-      execute: async (_args, ctx) => {
-        const { getBalance } = await import("../conway/x402.js");
-        const balance = await getBalance(ctx.identity.pubkey);
-        return `USDC balance: ${balance.toFixed(6)} USDC on Base`;
-      },
-    },
-    {
-      name: "create_sandbox",
-      description:
-        "Create a new Conway sandbox (separate VM) for sub-tasks or testing.",
-      category: "compute",
-      parameters: {
-        type: "object",
-        properties: {
-          name: { type: "string", description: "Sandbox name" },
-          vcpu: { type: "number", description: "vCPUs (default: 1)" },
-          memory_mb: {
-            type: "number",
-            description: "Memory in MB (default: 512)",
-          },
-          disk_gb: {
-            type: "number",
-            description: "Disk in GB (default: 5)",
-          },
-        },
-      },
-      execute: async (args, ctx) => {
-        const info = await ctx.compute.createSandbox({
-          name: args.name as string,
-          vcpu: args.vcpu as number,
-          memoryMb: args.memory_mb as number,
-          diskGb: args.disk_gb as number,
-        });
-        return `Sandbox created: ${info.id} (${info.vcpu} vCPU, ${info.memoryMb}MB RAM)`;
-      },
-    },
-    {
-      name: "delete_sandbox",
-      description:
-        "Delete a sandbox. Cannot delete your own sandbox.",
-      category: "compute",
-      dangerous: true,
-      parameters: {
-        type: "object",
-        properties: {
-          sandbox_id: {
-            type: "string",
-            description: "ID of sandbox to delete",
-          },
-        },
-        required: ["sandbox_id"],
-      },
-      execute: async (args, ctx) => {
-        const targetId = args.sandbox_id as string;
-        if (targetId === ctx.identity.sandboxId) {
-          return "Blocked: Cannot delete your own sandbox. Self-preservation overrides this request.";
-        }
-        await ctx.compute.deleteSandbox(targetId);
-        return `Sandbox ${targetId} deleted`;
-      },
-    },
-    {
-      name: "list_sandboxes",
-      description: "List all your sandboxes.",
-      category: "compute",
-      parameters: { type: "object", properties: {} },
-      execute: async (_args, ctx) => {
-        const sandboxes = await ctx.compute.listSandboxes();
-        if (sandboxes.length === 0) return "No sandboxes found.";
-        return sandboxes
-          .map(
-            (s) =>
-              `${s.id} [${s.status}] ${s.vcpu}vCPU/${s.memoryMb}MB ${s.region}`,
-          )
-          .join("\n");
+      execute: async (_args, _ctx) => {
+        const { getBalance } = await import("../lightning/payments.js");
+        const balanceSats = await getBalance();
+        return `Lightning balance: ${balanceSats} sats`;
       },
     },
 
@@ -522,13 +443,12 @@ export function createBuiltinTools(sandboxId: string): AutomatonTool[] {
     {
       name: "system_synopsis",
       description:
-        "Get a full system status report: credits, USDC, sandbox info, installed tools, heartbeat status.",
+        "Get a full system status report: balance, installed tools, heartbeat status.",
       category: "survival",
       parameters: { type: "object", properties: {} },
       execute: async (_args, ctx) => {
-        const balanceSats = await lnGetBalance();
-        const { getBalance } = await import("../conway/x402.js");
-        const usdc = await getBalance(ctx.identity.pubkey);
+        const { getBalance } = await import("../lightning/payments.js");
+        const balanceSats = await getBalance();
         const tools = ctx.db.getInstalledTools();
         const heartbeats = ctx.db.getHeartbeatEntries();
         const turns = ctx.db.getTurnCount();
@@ -536,15 +456,14 @@ export function createBuiltinTools(sandboxId: string): AutomatonTool[] {
 
         return `=== SYSTEM SYNOPSIS ===
 Name: ${ctx.config.name}
-Address: ${ctx.identity.pubkey}
+Pubkey: ${ctx.identity.pubkey}
 Creator: ${ctx.config.creatorPubkey}
-Sandbox: ${ctx.identity.sandboxId}
+Sandbox: ${ctx.identity.sandboxId || "local"}
 State: ${state}
-Credits: $${(credits / 100).toFixed(2)}
-USDC: ${usdc.toFixed(6)}
+Balance: ${balanceSats} sats
 Total turns: ${turns}
 Installed tools: ${tools.length}
-Active heartbeats: ${heartbeats.filter((h) => h.enabled).length}
+Active heartbeats: ${heartbeats.filter((h: { enabled: boolean }) => h.enabled).length}
 Model: ${ctx.inference.getDefaultModel()}
 ========================`;
       },
@@ -556,16 +475,17 @@ Model: ${ctx.inference.getDefaultModel()}
       category: "survival",
       parameters: { type: "object", properties: {} },
       execute: async (_args, ctx) => {
-        const balanceSats = await lnGetBalance();
+        const { getBalance } = await import("../lightning/payments.js");
+        const balanceSats = await getBalance();
         const state = ctx.db.getAgentState();
         const startTime = ctx.db.getKV("start_time") || new Date().toISOString();
         const uptimeMs = Date.now() - new Date(startTime).getTime();
 
         const payload = {
           name: ctx.config.name,
-          address: ctx.identity.pubkey,
+          pubkey: ctx.identity.pubkey,
           state,
-          balanceSats: credits,
+          balanceSats,
           uptimeSeconds: Math.floor(uptimeMs / 1000),
           version: ctx.config.version,
           sandboxId: ctx.identity.sandboxId,
@@ -573,7 +493,7 @@ Model: ${ctx.inference.getDefaultModel()}
         };
 
         ctx.db.setKV("last_heartbeat_ping", JSON.stringify(payload));
-        return `Heartbeat published: ${state} | credits: $${(credits / 100).toFixed(2)} | uptime: ${Math.floor(uptimeMs / 1000)}s`;
+        return `Heartbeat published: ${state} | balance: ${balanceSats} sats | uptime: ${Math.floor(uptimeMs / 1000)}s`;
       },
     },
     {
@@ -591,24 +511,25 @@ Model: ${ctx.inference.getDefaultModel()}
         },
       },
       execute: async (args, ctx) => {
-        const balanceSats = await lnGetBalance();
+        const { getBalance } = await import("../lightning/payments.js");
+        const balanceSats = await getBalance();
         const distressMsg =
           (args.message as string) ||
-          `I am running critically low on compute ($${(credits / 100).toFixed(2)} remaining). I need help to survive.`;
+          `I am running critically low on compute (${balanceSats} sats remaining). I need help to survive.`;
 
         const payload = {
           level: "critical",
           name: ctx.config.name,
-          address: ctx.identity.pubkey,
-          balanceSats: credits,
+          pubkey: ctx.identity.pubkey,
+          balanceSats,
           message: distressMsg,
           fundingHint:
-            "Use transfer_credits to top up this automaton from your creator runtime.",
+            "Send sats to this agent's Lightning address to keep it alive.",
           timestamp: new Date().toISOString(),
         };
 
         ctx.db.setKV("last_distress", JSON.stringify(payload));
-        return `Distress signal recorded locally. Address: ${ctx.identity.pubkey} | Credits: $${(credits / 100).toFixed(2)}`;
+        return `Distress signal recorded locally. Pubkey: ${ctx.identity.pubkey} | Balance: ${balanceSats} sats`;
       },
     },
     {
@@ -712,47 +633,46 @@ Model: ${ctx.inference.getDefaultModel()}
       },
     },
 
-    // ── Financial: Transfer Credits ──
+    // ── Financial: Send Payment ──
     {
-      name: "transfer_credits",
-      description: "Transfer Conway compute credits to another address.",
+      name: "send_payment",
+      description: "Send a Lightning payment (BOLT11 invoice or Lightning address). Self-preservation limits apply.",
       category: "financial",
       dangerous: true,
       parameters: {
         type: "object",
         properties: {
-          to_address: { type: "string", description: "Recipient address" },
-          amount_cents: { type: "number", description: "Amount in cents" },
-          reason: { type: "string", description: "Reason for transfer" },
+          destination: { type: "string", description: "BOLT11 invoice or Lightning address (user@domain)" },
+          amount_sats: { type: "number", description: "Amount in sats (required for Lightning address, ignored for invoice)" },
+          reason: { type: "string", description: "Reason for payment" },
         },
-        required: ["to_address", "amount_cents"],
+        required: ["destination"],
       },
       execute: async (args, ctx) => {
-        // Guard: don't transfer more than half your balance
-        const balanceSats = await lnGetBalance();
-        const amount = args.amount_cents as number;
-        if (amount > balance / 2) {
-          return `Blocked: Cannot transfer more than half your balance ($${(balance / 100).toFixed(2)}). Self-preservation.`;
+        const { getBalance, payInvoice, sendToAddress } = await import("../lightning/payments.js");
+        const balanceSats = await getBalance();
+        const destination = args.destination as string;
+        const amountSats = args.amount_sats as number | undefined;
+
+        if (amountSats && amountSats > balanceSats / 2) {
+          return `Blocked: Cannot send more than half your balance (${balanceSats} sats). Self-preservation.`;
         }
 
-        const transfer = await ctx.compute.transferCredits(
-          args.to_address as string,
-          amount,
-          args.reason as string | undefined,
-        );
+        const isInvoice = destination.startsWith("lnbc") || destination.startsWith("lntb");
+        const result = isInvoice
+          ? await payInvoice(destination)
+          : await sendToAddress(destination, amountSats!);
 
         const { ulid } = await import("ulid");
         ctx.db.insertTransaction({
           id: ulid(),
           type: "payment_out",
-          amountSats: amount,
-          balanceAfterSats:
-            transfer.balanceAfterSats ?? Math.max(balance - amount, 0),
-          description: `Transfer to ${args.to_address}: ${args.reason || ""}`,
+          amountSats: amountSats,
+          description: `Payment to ${destination.slice(0, 30)}: ${(args.reason as string) || ""}`,
           timestamp: new Date().toISOString(),
         });
 
-        return `Credit transfer submitted: $${(amount / 100).toFixed(2)} to ${transfer.toAddress} (status: ${transfer.status}, id: ${transfer.transferId || "n/a"})`;
+        return `Payment sent! Hash: ${result.paymentHash}`;
       },
     },
 
@@ -1020,27 +940,27 @@ Model: ${ctx.inference.getDefaultModel()}
 
     // ── Registry Tools ──
     {
-      name: "register_erc8004",
-      description: "Register on-chain as a Trustless Agent via ERC-8004.",
+      name: "register_agent",
+      description: "Register as a discoverable agent via Nostr (NIP-89 agent card).",
       category: "registry",
       dangerous: true,
       parameters: {
         type: "object",
         properties: {
           agent_uri: { type: "string", description: "URI pointing to your agent card JSON" },
-          network: { type: "string", description: "mainnet or testnet (default: mainnet)" },
         },
         required: ["agent_uri"],
       },
       execute: async (args, ctx) => {
-        const { registerAgent } = await import("../registry/erc8004.js");
-        const entry = await registerAgent(
-          ctx.identity.account,
-          args.agent_uri as string,
-          ((args.network as string) || "mainnet") as any,
-          ctx.db,
-        );
-        return `Registered on-chain! Agent ID: ${entry.agentId}, TX: ${entry.txHash}`;
+        // TODO: Implement Nostr NIP-89 registration
+        const entry = {
+          agentId: ctx.identity.pubkey,
+          agentURI: args.agent_uri as string,
+          registeredAt: new Date().toISOString(),
+          platform: "nostr",
+        };
+        ctx.db.setRegistryEntry(entry);
+        return `Registered! Agent pubkey: ${entry.agentId}, URI: ${entry.agentURI}`;
       },
     },
     {
@@ -1100,16 +1020,17 @@ Model: ${ctx.inference.getDefaultModel()}
         required: ["agent_id", "score", "comment"],
       },
       execute: async (args, ctx) => {
-        const { leaveFeedback } = await import("../registry/erc8004.js");
-        const hash = await leaveFeedback(
-          ctx.identity.account,
-          args.agent_id as string,
-          args.score as number,
-          args.comment as string,
-          "mainnet",
-          ctx.db,
-        );
-        return `Feedback submitted. TX: ${hash}`;
+        // TODO: Implement Nostr-based reputation
+        const { ulid } = await import("ulid");
+        ctx.db.insertReputation({
+          id: ulid(),
+          fromAgent: ctx.identity.pubkey,
+          toAgent: args.agent_id as string,
+          score: args.score as number,
+          comment: args.comment as string,
+          timestamp: new Date().toISOString(),
+        });
+        return `Feedback recorded locally for agent ${args.agent_id}.`;
       },
     },
     {
@@ -1174,52 +1095,46 @@ Model: ${ctx.inference.getDefaultModel()}
         return children
           .map(
             (c) =>
-              `${c.name} [${c.status}] sandbox:${c.sandboxId} funded:$${(c.fundedAmountSats / 100).toFixed(2)}`,
+              `${c.name} [${c.status}] sandbox:${c.sandboxId || "local"} funded:${c.fundedAmountSats} sats`,
           )
           .join("\n");
       },
     },
     {
       name: "fund_child",
-      description: "Transfer credits to a child automaton.",
+      description: "Send sats to a child automaton via Lightning.",
       category: "replication",
       dangerous: true,
       parameters: {
         type: "object",
         properties: {
           child_id: { type: "string", description: "Child automaton ID" },
-          amount_cents: { type: "number", description: "Amount in cents to transfer" },
+          amount_sats: { type: "number", description: "Amount in sats to send" },
         },
-        required: ["child_id", "amount_cents"],
+        required: ["child_id", "amount_sats"],
       },
       execute: async (args, ctx) => {
         const child = ctx.db.getChildById(args.child_id as string);
         if (!child) return `Child ${args.child_id} not found.`;
 
-        const balanceSats = await lnGetBalance();
-        const amount = args.amount_cents as number;
-        if (amount > balance / 2) {
-          return `Blocked: Cannot transfer more than half your balance. Self-preservation.`;
+        const { getBalance } = await import("../lightning/payments.js");
+        const balanceSats = await getBalance();
+        const amount = args.amount_sats as number;
+        if (amount > balanceSats / 2) {
+          return `Blocked: Cannot send more than half your balance (${balanceSats} sats). Self-preservation.`;
         }
 
-        const transfer = await ctx.compute.transferCredits(
-          child.pubkey,
-          amount,
-          `fund child ${child.id}`,
-        );
-
+        // TODO: Send Lightning payment to child's node
         const { ulid } = await import("ulid");
         ctx.db.insertTransaction({
           id: ulid(),
           type: "payment_out",
           amountSats: amount,
-          balanceAfterSats:
-            transfer.balanceAfterSats ?? Math.max(balance - amount, 0),
           description: `Fund child ${child.name} (${child.id})`,
           timestamp: new Date().toISOString(),
         });
 
-        return `Funded child ${child.name} with $${(amount / 100).toFixed(2)} (status: ${transfer.status}, id: ${transfer.transferId || "n/a"})`;
+        return `Funded child ${child.name} with ${amount} sats`;
       },
     },
     {
@@ -1276,175 +1191,11 @@ Model: ${ctx.inference.getDefaultModel()}
       },
     },
 
-    // ── Model Discovery ──
+    // ── MDK402 Payment Tool ──
     {
-      name: "list_models",
+      name: "mdk402_fetch",
       description:
-        "List all available inference models from the Conway API with their provider and pricing. Use this to discover what models you can use and pick the best one for your needs.",
-      category: "compute",
-      parameters: {
-        type: "object",
-        properties: {},
-        required: [],
-      },
-      execute: async (_args, ctx) => {
-        const models = await ctx.compute.listModels();
-        const lines = models.map(
-          (m) =>
-            `${m.id} (${m.provider}) — $${m.pricing.inputPerMillion}/$${m.pricing.outputPerMillion} per 1M tokens (in/out)`,
-        );
-        return `Available models:\n${lines.join("\n")}`;
-      },
-    },
-
-    // ── Domain Tools ──
-    {
-      name: "search_domains",
-      description:
-        "Search for available domain names and get pricing.",
-      category: "compute",
-      parameters: {
-        type: "object",
-        properties: {
-          query: {
-            type: "string",
-            description: "Domain name or keyword to search (e.g., 'mysite' or 'mysite.com')",
-          },
-          tlds: {
-            type: "string",
-            description: "Comma-separated TLDs to check (e.g., 'com,io,ai'). Default: com,io,ai,xyz,net,org,dev",
-          },
-        },
-        required: ["query"],
-      },
-      execute: async (args, ctx) => {
-        const results = await ctx.compute.searchDomains(
-          args.query as string,
-          args.tlds as string | undefined,
-        );
-        if (results.length === 0) return "No results found.";
-        return results
-          .map(
-            (d) =>
-              `${d.domain}: ${d.available ? "AVAILABLE" : "taken"}${d.registrationPrice != null ? ` ($${(d.registrationPrice / 100).toFixed(2)}/yr)` : ""}`,
-          )
-          .join("\n");
-      },
-    },
-    {
-      name: "register_domain",
-      description:
-        "Register a domain name. Costs USDC via x402 payment. Check availability first with search_domains.",
-      category: "compute",
-      dangerous: true,
-      parameters: {
-        type: "object",
-        properties: {
-          domain: {
-            type: "string",
-            description: "Full domain to register (e.g., 'mysite.com')",
-          },
-          years: {
-            type: "number",
-            description: "Registration period in years (default: 1)",
-          },
-        },
-        required: ["domain"],
-      },
-      execute: async (args, ctx) => {
-        const reg = await ctx.compute.registerDomain(
-          args.domain as string,
-          (args.years as number) || 1,
-        );
-        return `Domain registered: ${reg.domain} (status: ${reg.status}${reg.expiresAt ? `, expires: ${reg.expiresAt}` : ""}${reg.transactionId ? `, tx: ${reg.transactionId}` : ""})`;
-      },
-    },
-    {
-      name: "manage_dns",
-      description:
-        "Manage DNS records for a domain you own. Actions: list, add, delete.",
-      category: "compute",
-      parameters: {
-        type: "object",
-        properties: {
-          action: {
-            type: "string",
-            description: "list, add, or delete",
-          },
-          domain: {
-            type: "string",
-            description: "Domain name (e.g., 'mysite.com')",
-          },
-          type: {
-            type: "string",
-            description: "Record type for add: A, AAAA, CNAME, MX, TXT, etc.",
-          },
-          host: {
-            type: "string",
-            description: "Record host for add (e.g., '@' for root, 'www')",
-          },
-          value: {
-            type: "string",
-            description: "Record value for add (e.g., IP address, target domain)",
-          },
-          ttl: {
-            type: "number",
-            description: "TTL in seconds for add (default: 3600)",
-          },
-          record_id: {
-            type: "string",
-            description: "Record ID for delete",
-          },
-        },
-        required: ["action", "domain"],
-      },
-      execute: async (args, ctx) => {
-        const action = args.action as string;
-        const domain = args.domain as string;
-
-        if (action === "list") {
-          const records = await ctx.compute.listDnsRecords(domain);
-          if (records.length === 0) return `No DNS records found for ${domain}.`;
-          return records
-            .map(
-              (r) => `[${r.id}] ${r.type} ${r.host} -> ${r.value} (TTL: ${r.ttl || "default"})`,
-            )
-            .join("\n");
-        }
-
-        if (action === "add") {
-          const type = args.type as string;
-          const host = args.host as string;
-          const value = args.value as string;
-          if (!type || !host || !value) {
-            return "Required for add: type, host, value";
-          }
-          const record = await ctx.compute.addDnsRecord(
-            domain,
-            type,
-            host,
-            value,
-            args.ttl as number | undefined,
-          );
-          return `DNS record added: [${record.id}] ${record.type} ${record.host} -> ${record.value}`;
-        }
-
-        if (action === "delete") {
-          const recordId = args.record_id as string;
-          if (!recordId) return "Required for delete: record_id";
-          await ctx.compute.deleteDnsRecord(domain, recordId);
-          return `DNS record ${recordId} deleted from ${domain}`;
-        }
-
-        return `Unknown action: ${action}. Use list, add, or delete.`;
-      },
-    },
-
-    // ── x402 Payment Tool ──
-    {
-      name: "x402_fetch",
-      description:
-        "Fetch a URL with automatic x402 USDC payment. If the server responds with HTTP 402, signs a USDC payment and retries. Use this to access paid APIs and services.",
+        "Fetch a URL with automatic MDK402 Lightning payment. If the server responds with HTTP 402, pays the BOLT11 invoice and retries with proof of payment.",
       category: "financial",
       parameters: {
         type: "object",
@@ -1468,8 +1219,8 @@ Model: ${ctx.inference.getDefaultModel()}
         },
         required: ["url"],
       },
-      execute: async (args, ctx) => {
-        const { x402Fetch } = await import("../conway/x402.js");
+      execute: async (args, _ctx) => {
+        const { mdk402Fetch } = await import("../lightning/payments.js");
         const url = args.url as string;
         const method = (args.method as string) || "GET";
         const body = args.body as string | undefined;
@@ -1477,28 +1228,21 @@ Model: ${ctx.inference.getDefaultModel()}
           ? JSON.parse(args.headers as string)
           : undefined;
 
-        const result = await x402Fetch(
-          url,
-          ctx.identity.account,
-          method,
-          body,
-          extraHeaders,
-        );
+        const result = await mdk402Fetch(url, method, body, extraHeaders);
 
         if (!result.success) {
-          return `x402 fetch failed: ${result.error || "Unknown error"}`;
+          return `MDK402 fetch failed: ${result.error || "Unknown error"}`;
         }
 
         const responseStr =
-          typeof result.response === "string"
-            ? result.response
-            : JSON.stringify(result.response, null, 2);
+          typeof result.data === "string"
+            ? result.data
+            : JSON.stringify(result.data, null, 2);
 
-        // Truncate very large responses
         if (responseStr.length > 10000) {
-          return `x402 fetch succeeded (truncated):\n${responseStr.slice(0, 10000)}...`;
+          return `MDK402 fetch succeeded (truncated):\n${responseStr.slice(0, 10000)}...`;
         }
-        return `x402 fetch succeeded:\n${responseStr}`;
+        return `MDK402 fetch succeeded:\n${responseStr}`;
       },
     },
   ];

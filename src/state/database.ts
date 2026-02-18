@@ -372,9 +372,9 @@ export function createDatabase(dbPath: string): AutomatonDatabase {
     ).run(
       entry.agentId,
       entry.agentURI,
-      entry.chain,
-      entry.contractAddress,
-      entry.txHash,
+      entry.platform ?? null,
+      null,
+      null,
       entry.registeredAt,
     );
   };
@@ -391,7 +391,7 @@ export function createDatabase(dbPath: string): AutomatonDatabase {
       entry.toAgent,
       entry.score,
       entry.comment,
-      entry.txHash ?? null,
+      entry.timestamp ?? null,
     );
   };
 
@@ -584,7 +584,7 @@ function deserializeChild(row: any): ChildAutomaton {
   return {
     id: row.id,
     name: row.name,
-    address: row.pubkey,
+    pubkey: row.pubkey,
     sandboxId: row.sandbox_id,
     genesisPrompt: row.genesis_prompt,
     creatorMessage: row.creator_message ?? undefined,
@@ -599,9 +599,7 @@ function deserializeRegistry(row: any): RegistryEntry {
   return {
     agentId: row.agent_id,
     agentURI: row.agent_uri,
-    chain: row.platform,
-    contractAddress: row.contract_address,
-    txHash: row.tx_hash,
+    platform: row.platform ?? undefined,
     registeredAt: row.registered_at,
   };
 }
@@ -625,7 +623,6 @@ function deserializeReputation(row: any): ReputationEntry {
     toAgent: row.to_agent,
     score: row.score,
     comment: row.comment,
-    txHash: row.tx_hash ?? undefined,
     timestamp: row.created_at,
   };
 }

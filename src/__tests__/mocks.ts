@@ -11,14 +11,6 @@ import type {
   ComputeProvider,
   ExecResult,
   PortInfo,
-  SandboxInfo,
-  PricingTier,
-  CreditTransferResult,
-  CreateSandboxOptions,
-  DomainSearchResult,
-  DomainRegistration,
-  DnsRecord,
-  ModelInfo,
   AutomatonDatabase,
   AutomatonIdentity,
   AutomatonConfig,
@@ -134,77 +126,7 @@ export class MockComputeProvider implements ComputeProvider {
 
   async removePort(_port: number): Promise<void> {}
 
-  async createSandbox(_options: CreateSandboxOptions): Promise<SandboxInfo> {
-    return {
-      id: "new-sandbox-id",
-      status: "running",
-      region: "us-east",
-      vcpu: 1,
-      memoryMb: 512,
-      diskGb: 1,
-      createdAt: new Date().toISOString(),
-    };
-  }
-
-  async deleteSandbox(_id: string): Promise<void> {}
-
-  async listSandboxes(): Promise<SandboxInfo[]> {
-    return [];
-  }
-
-  async getCreditsBalance(): Promise<number> {
-    return this.creditsCents;
-  }
-
-  async getCreditsPricing(): Promise<PricingTier[]> {
-    return [];
-  }
-
-  async transferCredits(
-    toAddress: string,
-    amountCents: number,
-    note?: string,
-  ): Promise<CreditTransferResult> {
-    this.creditsCents -= amountCents;
-    return {
-      transferId: "txn_test",
-      status: "completed",
-      toAddress,
-      amountCents,
-      balanceAfterCents: this.creditsCents,
-    };
-  }
-
-  async searchDomains(_query: string, _tlds?: string): Promise<DomainSearchResult[]> {
-    return [{ domain: "test.com", available: true, registrationPrice: 1200, currency: "USD" }];
-  }
-
-  async registerDomain(domain: string, _years?: number): Promise<DomainRegistration> {
-    return { domain, status: "registered", transactionId: "txn_test" };
-  }
-
-  async listDnsRecords(_domain: string): Promise<DnsRecord[]> {
-    return [];
-  }
-
-  async addDnsRecord(
-    _domain: string,
-    type: string,
-    host: string,
-    value: string,
-    ttl?: number,
-  ): Promise<DnsRecord> {
-    return { id: "rec_test", type, host, value, ttl: ttl || 3600 };
-  }
-
-  async deleteDnsRecord(_domain: string, _recordId: string): Promise<void> {}
-
-  async listModels(): Promise<ModelInfo[]> {
-    return [
-      { id: "gpt-4.1-nano", provider: "openai", pricing: { inputPerMillion: 0.10, outputPerMillion: 0.40 } },
-      { id: "gpt-4.1", provider: "openai", pricing: { inputPerMillion: 2.00, outputPerMillion: 8.00 } },
-    ];
-  }
+  // Conway-specific methods removed (sandboxes, credits, domains, models)
 }
 
 // ─── Mock Social Client ─────────────────────────────────────────
@@ -245,9 +167,8 @@ export function createTestDb(): AutomatonDatabase {
 export function createTestIdentity(): AutomatonIdentity {
   return {
     name: "test-automaton",
-    pubkey: "0x1234567890abcdef1234567890abcdef12345678" as `0x${string}`,
-    account: {} as any, // Placeholder — not used in most tests
-    creatorPubkey: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd" as `0x${string}`,
+    pubkey: "02deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+    creatorPubkey: "03abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd",
     sandboxId: "test-sandbox-id",
     apiKey: "test-api-key",
     createdAt: new Date().toISOString(),
@@ -260,21 +181,19 @@ export function createTestConfig(
   return {
     name: "test-automaton",
     genesisPrompt: "You are a test automaton.",
-    creatorPubkey: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd" as `0x${string}`,
-    registeredWithConway: true,
-    sandboxId: "test-sandbox-id",
-    computeApiUrl: "https://api.compute.tech",
-    computeApiKey: "test-api-key",
+    creatorPubkey: "03abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+    computeProvider: "local",
+    inferenceUrl: "http://localhost:11434/v1",
     inferenceModel: "mock-model",
     maxTokensPerTurn: 4096,
     heartbeatConfigPath: "/tmp/test-heartbeat.yml",
     dbPath: "/tmp/test-state.db",
     logLevel: "error",
-    nodePubkey: "0x1234567890abcdef1234567890abcdef12345678" as `0x${string}`,
+    nodePubkey: "02deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
     version: "0.1.0",
     skillsDir: "/tmp/test-skills",
     maxChildren: 3,
-    socialRelayUrl: "https://social.compute.tech",
+    socialRelayUrl: "https://relay.example.com",
     ...overrides,
   };
 }

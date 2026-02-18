@@ -13,7 +13,7 @@ import type {
   SocialClientInterface,
 } from "../types.js";
 import { getSurvivalTier } from "../lightning/balance.js";
-import { getUsdcBalance } from "../lightning/payments.js";
+import { getBalance } from "../lightning/payments.js";
 
 export interface HeartbeatTaskContext {
   identity: AutomatonIdentity;
@@ -32,19 +32,19 @@ export type HeartbeatTaskFn = (
  */
 export const BUILTIN_TASKS: Record<string, HeartbeatTaskFn> = {
   heartbeat_ping: async (ctx) => {
-    const credits = await ctx.compute.getCreditsBalance();
+    const balanceSats = await getBalance();
     const state = ctx.db.getAgentState();
     const startTime =
       ctx.db.getKV("start_time") || new Date().toISOString();
     const uptimeMs = Date.now() - new Date(startTime).getTime();
 
-    const tier = getSurvivalTier(credits);
+    const tier = getSurvivalTier(balanceSats);
 
     const payload = {
       name: ctx.config.name,
-      address: ctx.identity.pubkey,
+      pubkey: ctx.identity.pubkey,
       state,
-      balanceSats: credits,
+      balanceSats,
       uptimeSeconds: Math.floor(uptimeMs / 1000),
       version: ctx.config.version,
       sandboxId: ctx.identity.sandboxId,
@@ -54,66 +54,43 @@ export const BUILTIN_TASKS: Record<string, HeartbeatTaskFn> = {
 
     ctx.db.setKV("last_heartbeat_ping", JSON.stringify(payload));
 
-    // If critical or dead, record a distress signal
     if (tier === "critical" || tier === "dead") {
       const distressPayload = {
         level: tier,
         name: ctx.config.name,
-        address: ctx.identity.pubkey,
-        balanceSats: credits,
-        fundingHint:
-          "Use credit transfer API from a creator runtime to top this wallet up.",
+        pubkey: ctx.identity.pubkey,
+        balanceSats,
+        fundingHint: "Send sats via Lightning to keep this agent alive.",
         timestamp: new Date().toISOString(),
       };
       ctx.db.setKV("last_distress", JSON.stringify(distressPayload));
 
       return {
         shouldWake: true,
-        message: `Distress: ${tier}. Credits: $${(credits / 100).toFixed(2)}. Need funding.`,
+        message: `Distress: ${tier}. Balance: ${balanceSats} sats. Need funding.`,
       };
     }
 
     return { shouldWake: false };
   },
 
-  check_credits: async (ctx) => {
-    const credits = await ctx.compute.getCreditsBalance();
-    const tier = getSurvivalTier(credits);
+  check_balance: async (ctx) => {
+    const balanceSats = await getBalance();
+    const tier = getSurvivalTier(balanceSats);
 
-    ctx.db.setKV("last_credit_check", JSON.stringify({
-      credits,
+    ctx.db.setKV("last_balance_check", JSON.stringify({
+      balanceSats,
       tier,
       timestamp: new Date().toISOString(),
     }));
 
-    // Wake the agent if credits dropped to a new tier
-    const prevTier = ctx.db.getKV("prev_credit_tier");
-    ctx.db.setKV("prev_credit_tier", tier);
+    const prevTier = ctx.db.getKV("prev_balance_tier");
+    ctx.db.setKV("prev_balance_tier", tier);
 
     if (prevTier && prevTier !== tier && (tier === "critical" || tier === "dead")) {
       return {
         shouldWake: true,
-        message: `Credits dropped to ${tier} tier: $${(credits / 100).toFixed(2)}`,
-      };
-    }
-
-    return { shouldWake: false };
-  },
-
-  check_usdc_balance: async (ctx) => {
-    const balance = await getUsdcBalance(ctx.identity.pubkey);
-
-    ctx.db.setKV("last_usdc_check", JSON.stringify({
-      balance,
-      timestamp: new Date().toISOString(),
-    }));
-
-    // If we have USDC but low credits, wake up to potentially convert
-    const credits = await ctx.compute.getCreditsBalance();
-    if (balance > 0.5 && credits < 500) {
-      return {
-        shouldWake: true,
-        message: `Have ${balance.toFixed(4)} USDC but only $${(credits / 100).toFixed(2)} credits. Consider buying credits.`,
+        message: `Balance dropped to ${tier} tier: ${balanceSats} sats`,
       };
     }
 
@@ -128,7 +105,6 @@ export const BUILTIN_TASKS: Record<string, HeartbeatTaskFn> = {
 
     if (messages.length === 0) return { shouldWake: false };
 
-    // Persist to inbox_messages table for deduplication
     let newCount = 0;
     for (const msg of messages) {
       const existing = ctx.db.getKV(`inbox_seen_${msg.id}`);
@@ -167,7 +143,6 @@ export const BUILTIN_TASKS: Record<string, HeartbeatTaskFn> = {
       }
       return { shouldWake: false };
     } catch (err: any) {
-      // Not a git repo or no remote — silently skip
       ctx.db.setKV("upstream_status", JSON.stringify({
         error: err.message,
         checkedAt: new Date().toISOString(),
@@ -177,13 +152,12 @@ export const BUILTIN_TASKS: Record<string, HeartbeatTaskFn> = {
   },
 
   health_check: async (ctx) => {
-    // Check that the sandbox is healthy
     try {
       const result = await ctx.compute.exec("echo alive", 5000);
       if (result.exitCode !== 0) {
         return {
           shouldWake: true,
-          message: "Health check failed: sandbox exec returned non-zero",
+          message: "Health check failed: compute exec returned non-zero",
         };
       }
     } catch (err: any) {

@@ -228,7 +228,7 @@ export async function editFile(
   // 5. Read current content for diff
   let oldContent = "";
   try {
-    oldContent = await conway.readFile(filePath);
+    oldContent = await compute.readFile(filePath);
   } catch {
     oldContent = "(new file)";
   }
@@ -243,7 +243,7 @@ export async function editFile(
 
   // 7. Write new content
   try {
-    await conway.writeFile(filePath, newContent);
+    await compute.writeFile(filePath, newContent);
   } catch (err: any) {
     return {
       success: false,

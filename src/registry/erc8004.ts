@@ -107,9 +107,7 @@ export async function registerAgent(
   const entry: RegistryEntry = {
     agentId,
     agentURI,
-    chain: `eip155:${chain.id}`,
-    contractAddress: contracts.identity,
-    txHash: hash,
+    platform: `eip155:${chain.id}`,
     registeredAt: new Date().toISOString(),
   };
 
@@ -147,7 +145,6 @@ export async function updateAgentURI(
   const entry = db.getRegistryEntry();
   if (entry) {
     entry.agentURI = newAgentURI;
-    entry.txHash = hash;
     db.setRegistryEntry(entry);
   }
 
