@@ -50,7 +50,7 @@ export async function spawnChild(
   const child: ChildAutomaton = {
     id: childId,
     name: genesis.name,
-    address: "0x0000000000000000000000000000000000000000" as any, // Will be set after keygen
+    pubkey: "" as any, // Will be set after keygen
     sandboxId: sandbox.id,
     genesisPrompt: genesis.genesisPrompt,
     creatorMessage: genesis.creatorMessage,

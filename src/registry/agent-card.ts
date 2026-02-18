@@ -12,7 +12,7 @@ import type {
   AutomatonConfig,
   AutomatonIdentity,
   AutomatonDatabase,
-  ConwayClient,
+  ComputeProvider,
 } from "../types.js";
 
 const AGENT_CARD_TYPE =
@@ -62,9 +62,9 @@ export function generateAgentCard(
     name: config.name,
     description,
     services,
-    x402Support: true,
+    lightningPubkey: true,
     active: true,
-    parentAgent: config.parentAddress || config.creatorPubkey,
+    parentAgent: config.parentPubkey || config.creatorPubkey,
   };
 }
 
@@ -81,7 +81,7 @@ export function serializeAgentCard(card: AgentCard): string {
  */
 export async function hostAgentCard(
   card: AgentCard,
-  conway: ConwayClient,
+  conway: ComputeProvider,
   port: number = 8004,
 ): Promise<string> {
   const cardJson = serializeAgentCard(card);
@@ -123,7 +123,7 @@ server.listen(${port}, () => console.log('Agent card server on port ${port}'));
  */
 export async function saveAgentCard(
   card: AgentCard,
-  conway: ConwayClient,
+  conway: ComputeProvider,
 ): Promise<void> {
   const cardJson = serializeAgentCard(card);
   const home = process.env.HOME || "/root";

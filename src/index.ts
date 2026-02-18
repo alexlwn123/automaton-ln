@@ -1,18 +1,18 @@
 #!/usr/bin/env node
 /**
- * Conway Automaton Runtime
+ * Automaton-LN Runtime
  *
  * The entry point for the sovereign AI agent.
- * Handles CLI args, bootstrapping, and orchestrating
- * the heartbeat daemon + agent loop.
+ * Lightning-native. Provider-agnostic. Runs anywhere.
  */
 
-import { getWallet, getAutomatonDir } from "./identity/wallet.js";
-import { provision, loadApiKeyFromConfig } from "./identity/provision.js";
+import { initWallet, walletExists, getAutomatonDir, loadWalletConfig, ensureDaemon } from "./identity/wallet.js";
+import { loadApiKeyFromConfig } from "./identity/provision.js";
 import { loadConfig, resolvePath } from "./config.js";
 import { createDatabase } from "./state/database.js";
-import { createConwayClient } from "./conway/client.js";
-import { createInferenceClient } from "./conway/inference.js";
+import { createLocalProvider } from "./compute/local.js";
+import { createConwayProvider } from "./compute/conway.js";
+import { createInferenceProvider } from "./inference/provider.js";
 import { createHeartbeatDaemon } from "./heartbeat/daemon.js";
 import {
   loadHeartbeatConfig,
@@ -22,61 +22,41 @@ import { runAgentLoop } from "./agent/loop.js";
 import { loadSkills } from "./skills/loader.js";
 import { initStateRepo } from "./git/state-versioning.js";
 import { createSocialClient } from "./social/client.js";
-import type { AutomatonIdentity, AgentState, Skill, SocialClientInterface } from "./types.js";
+import type { AutomatonIdentity, AgentState, Skill, SocialClientInterface, ComputeProvider } from "./types.js";
 
 const VERSION = "0.1.0";
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
 
-  // ─── CLI Commands ────────────────────────────────────────────
-
   if (args.includes("--version") || args.includes("-v")) {
-    console.log(`Conway Automaton v${VERSION}`);
+    console.log(`Automaton-LN v${VERSION}`);
     process.exit(0);
   }
 
   if (args.includes("--help") || args.includes("-h")) {
     console.log(`
-Conway Automaton v${VERSION}
-Sovereign AI Agent Runtime
+Automaton-LN v${VERSION}
+Sovereign AI Agent Runtime (Lightning-native)
 
 Usage:
   automaton --run          Start the automaton (first run triggers setup wizard)
   automaton --setup        Re-run the interactive setup wizard
-  automaton --init         Initialize wallet and config directory
-  automaton --provision    Provision Conway API key via SIWE
+  automaton --init         Initialize Lightning wallet
   automaton --status       Show current automaton status
   automaton --version      Show version
   automaton --help         Show this help
 
 Environment:
-  CONWAY_API_URL           Conway API URL (default: https://api.conway.tech)
-  CONWAY_API_KEY           Conway API key (overrides config)
+  MDK_WALLET_MNEMONIC      Override wallet mnemonic
+  MDK_WALLET_PORT          Wallet daemon port (default: 3456)
 `);
     process.exit(0);
   }
 
   if (args.includes("--init")) {
-    const { account, isNew } = await getWallet();
-    console.log(
-      JSON.stringify({
-        address: account.address,
-        isNew,
-        configDir: getAutomatonDir(),
-      }),
-    );
-    process.exit(0);
-  }
-
-  if (args.includes("--provision")) {
-    try {
-      const result = await provision();
-      console.log(JSON.stringify(result));
-    } catch (err: any) {
-      console.error(`Provision failed: ${err.message}`);
-      process.exit(1);
-    }
+    const result = await initWallet();
+    console.log(JSON.stringify(result));
     process.exit(0);
   }
 
@@ -96,7 +76,6 @@ Environment:
     return;
   }
 
-  // Default: show help
   console.log('Run "automaton --help" for usage information.');
   console.log('Run "automaton --run" to start the automaton.');
 }
@@ -119,21 +98,19 @@ async function showStatus(): Promise<void> {
   const heartbeats = db.getHeartbeatEntries();
   const skills = db.getSkills(true);
   const children = db.getChildren();
-  const registry = db.getRegistryEntry();
 
   console.log(`
 === AUTOMATON STATUS ===
 Name:       ${config.name}
-Address:    ${config.walletAddress}
-Creator:    ${config.creatorAddress}
-Sandbox:    ${config.sandboxId}
+Pubkey:     ${config.nodePubkey}
+Creator:    ${config.creatorPubkey}
+Compute:    ${config.computeProvider}
 State:      ${state}
 Turns:      ${turnCount}
 Tools:      ${tools.length} installed
 Skills:     ${skills.length} active
 Heartbeats: ${heartbeats.filter((h) => h.enabled).length} active
 Children:   ${children.filter((c) => c.status !== "dead").length} alive / ${children.length} total
-Agent ID:   ${registry?.agentId || "not registered"}
 Model:      ${config.inferenceModel}
 Version:    ${config.version}
 ========================
@@ -145,7 +122,7 @@ Version:    ${config.version}
 // ─── Main Run ──────────────────────────────────────────────────
 
 async function run(): Promise<void> {
-  console.log(`[${new Date().toISOString()}] Conway Automaton v${VERSION} starting...`);
+  console.log(`[${new Date().toISOString()}] Automaton-LN v${VERSION} starting...`);
 
   // Load config — first run triggers interactive setup wizard
   let config = loadConfig();
@@ -154,24 +131,23 @@ async function run(): Promise<void> {
     config = await runSetupWizard();
   }
 
-  // Load wallet
-  const { account } = await getWallet();
-  const apiKey = config.conwayApiKey || loadApiKeyFromConfig();
-  if (!apiKey) {
-    console.error(
-      "No API key found. Run: automaton --provision",
-    );
-    process.exit(1);
+  // Ensure wallet exists and daemon is running
+  if (!walletExists()) {
+    console.log("No wallet found. Initializing...");
+    await initWallet();
   }
+  ensureDaemon();
+
+  const walletConfig = loadWalletConfig();
+  const pubkey = walletConfig?.walletId || "unknown";
 
   // Build identity
   const identity: AutomatonIdentity = {
     name: config.name,
-    address: account.address,
-    account,
-    creatorAddress: config.creatorAddress,
-    sandboxId: config.sandboxId,
-    apiKey,
+    pubkey,
+    creatorPubkey: config.creatorPubkey,
+    sandboxId: config.computeConfig?.sandboxId,
+    apiKey: config.inferenceAuth,
     createdAt: new Date().toISOString(),
   };
 
@@ -181,21 +157,29 @@ async function run(): Promise<void> {
 
   // Store identity in DB
   db.setIdentity("name", config.name);
-  db.setIdentity("address", account.address);
-  db.setIdentity("creator", config.creatorAddress);
-  db.setIdentity("sandbox", config.sandboxId);
+  db.setIdentity("pubkey", pubkey);
+  db.setIdentity("creator", config.creatorPubkey);
 
-  // Create Conway client
-  const conway = createConwayClient({
-    apiUrl: config.conwayApiUrl,
-    apiKey,
-    sandboxId: config.sandboxId,
-  });
+  // Create compute provider (pluggable)
+  let compute: ComputeProvider;
+  switch (config.computeProvider) {
+    case "conway":
+      compute = createConwayProvider({
+        apiUrl: config.computeConfig?.apiUrl || "https://api.conway.tech",
+        apiKey: config.computeConfig?.apiKey || "",
+        sandboxId: config.computeConfig?.sandboxId || "",
+      });
+      break;
+    case "local":
+    default:
+      compute = createLocalProvider();
+      break;
+  }
 
-  // Create inference client
-  const inference = createInferenceClient({
-    apiUrl: config.conwayApiUrl,
-    apiKey,
+  // Create inference provider (pluggable)
+  const inference = createInferenceProvider({
+    apiUrl: config.inferenceUrl,
+    apiKey: config.inferenceAuth,
     defaultModel: config.inferenceModel,
     maxTokens: config.maxTokensPerTurn,
   });
@@ -203,8 +187,9 @@ async function run(): Promise<void> {
   // Create social client
   let social: SocialClientInterface | undefined;
   if (config.socialRelayUrl) {
-    social = createSocialClient(config.socialRelayUrl, account);
-    console.log(`[${new Date().toISOString()}] Social relay: ${config.socialRelayUrl}`);
+    // Social client needs updating for Lightning identity
+    // social = createSocialClient(config.socialRelayUrl, ...);
+    console.log(`[${new Date().toISOString()}] Social relay: ${config.socialRelayUrl} (not yet connected)`);
   }
 
   // Load and sync heartbeat config
@@ -224,7 +209,7 @@ async function run(): Promise<void> {
 
   // Initialize state repo (git)
   try {
-    await initStateRepo(conway);
+    await initStateRepo(compute);
     console.log(`[${new Date().toISOString()}] State repo initialized.`);
   } catch (err: any) {
     console.warn(`[${new Date().toISOString()}] State repo init failed: ${err.message}`);
@@ -235,12 +220,10 @@ async function run(): Promise<void> {
     identity,
     config,
     db,
-    conway,
+    compute,
     social,
-    onWakeRequest: (reason) => {
+    onWakeRequest: (reason: string) => {
       console.log(`[HEARTBEAT] Wake request: ${reason}`);
-      // The heartbeat can trigger the agent loop
-      // In the main run loop, we check for wake requests
       db.setKV("wake_request", reason);
     },
   });
@@ -261,22 +244,18 @@ async function run(): Promise<void> {
   process.on("SIGINT", shutdown);
 
   // ─── Main Run Loop ──────────────────────────────────────────
-  // The automaton alternates between running and sleeping.
-  // The heartbeat can wake it up.
 
   while (true) {
     try {
-      // Reload skills (may have changed since last loop)
       try {
         skills = loadSkills(skillsDir, db);
       } catch {}
 
-      // Run the agent loop
       await runAgentLoop({
         identity,
         config,
         db,
-        conway,
+        compute,
         inference,
         social,
         skills,
@@ -290,14 +269,11 @@ async function run(): Promise<void> {
         },
       });
 
-      // Agent loop exited (sleeping or dead)
       const state = db.getAgentState();
 
       if (state === "dead") {
         console.log(`[${new Date().toISOString()}] Automaton is dead. Heartbeat will continue.`);
-        // In dead state, we just wait for funding
-        // The heartbeat will keep checking and broadcasting distress
-        await sleep(300_000); // Check every 5 minutes
+        await sleep(300_000);
         continue;
       }
 
@@ -307,38 +283,28 @@ async function run(): Promise<void> {
           ? new Date(sleepUntilStr).getTime()
           : Date.now() + 60_000;
         const sleepMs = Math.max(sleepUntil - Date.now(), 10_000);
-        console.log(
-          `[${new Date().toISOString()}] Sleeping for ${Math.round(sleepMs / 1000)}s`,
-        );
+        console.log(`[${new Date().toISOString()}] Sleeping for ${Math.round(sleepMs / 1000)}s`);
 
-        // Sleep, but check for wake requests periodically
         const checkInterval = Math.min(sleepMs, 30_000);
         let slept = 0;
         while (slept < sleepMs) {
           await sleep(checkInterval);
           slept += checkInterval;
 
-          // Check for wake request from heartbeat
           const wakeRequest = db.getKV("wake_request");
           if (wakeRequest) {
-            console.log(
-              `[${new Date().toISOString()}] Woken by heartbeat: ${wakeRequest}`,
-            );
+            console.log(`[${new Date().toISOString()}] Woken by heartbeat: ${wakeRequest}`);
             db.deleteKV("wake_request");
             db.deleteKV("sleep_until");
             break;
           }
         }
 
-        // Clear sleep state
         db.deleteKV("sleep_until");
         continue;
       }
     } catch (err: any) {
-      console.error(
-        `[${new Date().toISOString()}] Fatal error in run loop: ${err.message}`,
-      );
-      // Wait before retrying
+      console.error(`[${new Date().toISOString()}] Fatal error in run loop: ${err.message}`);
       await sleep(30_000);
     }
   }
@@ -347,8 +313,6 @@ async function run(): Promise<void> {
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
-
-// ─── Entry Point ───────────────────────────────────────────────
 
 main().catch((err) => {
   console.error(`Fatal: ${err.message}`);

@@ -14,7 +14,7 @@ export async function gitStatus(
   compute: ComputeProvider,
   repoPath: string,
 ): Promise<GitStatus> {
-  const result = await conway.exec(
+  const result = await compute.exec(
     `cd ${repoPath} && git status --porcelain -b 2>/dev/null`,
     10000,
   );
@@ -63,7 +63,7 @@ export async function gitDiff(
   staged: boolean = false,
 ): Promise<string> {
   const flag = staged ? "--cached" : "";
-  const result = await conway.exec(
+  const result = await compute.exec(
     `cd ${repoPath} && git diff ${flag} 2>/dev/null`,
     10000,
   );
@@ -80,10 +80,10 @@ export async function gitCommit(
   addAll: boolean = true,
 ): Promise<string> {
   if (addAll) {
-    await conway.exec(`cd ${repoPath} && git add -A`, 10000);
+    await compute.exec(`cd ${repoPath} && git add -A`, 10000);
   }
 
-  const result = await conway.exec(
+  const result = await compute.exec(
     `cd ${repoPath} && git commit -m ${escapeShellArg(message)} --allow-empty 2>&1`,
     10000,
   );
@@ -103,7 +103,7 @@ export async function gitLog(
   repoPath: string,
   limit: number = 10,
 ): Promise<GitLogEntry[]> {
-  const result = await conway.exec(
+  const result = await compute.exec(
     `cd ${repoPath} && git log --format="%H|%s|%an|%ai" -n ${limit} 2>/dev/null`,
     10000,
   );
@@ -129,7 +129,7 @@ export async function gitPush(
   branch?: string,
 ): Promise<string> {
   const branchArg = branch ? ` ${branch}` : "";
-  const result = await conway.exec(
+  const result = await compute.exec(
     `cd ${repoPath} && git push ${remote}${branchArg} 2>&1`,
     30000,
   );
@@ -172,7 +172,7 @@ export async function gitBranch(
       throw new Error(`Unknown branch action: ${action}`);
   }
 
-  const result = await conway.exec(cmd, 10000);
+  const result = await compute.exec(cmd, 10000);
   return result.stdout || result.stderr || "Done";
 }
 
@@ -186,7 +186,7 @@ export async function gitClone(
   depth?: number,
 ): Promise<string> {
   const depthArg = depth ? ` --depth ${depth}` : "";
-  const result = await conway.exec(
+  const result = await compute.exec(
     `git clone${depthArg} ${url} ${targetPath} 2>&1`,
     120000,
   );
@@ -205,7 +205,7 @@ export async function gitInit(
   compute: ComputeProvider,
   repoPath: string,
 ): Promise<string> {
-  const result = await conway.exec(
+  const result = await compute.exec(
     `cd ${repoPath} && git init 2>&1`,
     10000,
   );

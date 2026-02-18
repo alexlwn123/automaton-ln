@@ -16,7 +16,7 @@ import type {
   SocialClientInterface,
 } from "../types.js";
 import { BUILTIN_TASKS, type HeartbeatTaskContext } from "./tasks.js";
-import { getSurvivalTier } from "../conway/credits.js";
+import { getSurvivalTier } from "../lightning/balance.js";
 
 export interface HeartbeatDaemonOptions {
   identity: AutomatonIdentity;
@@ -113,7 +113,7 @@ export function createHeartbeatDaemon(
     // Check survival tier to adjust behavior
     let balanceSats = 0;
     try {
-      balanceSats = await conway.getCreditsBalance();
+      balanceSats = await conway.getBalance();
     } catch {}
 
     const tier = getSurvivalTier(balanceSats);

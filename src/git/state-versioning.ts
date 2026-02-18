@@ -29,7 +29,7 @@ export async function initStateRepo(
   const dir = resolveHome(AUTOMATON_DIR);
 
   // Check if already initialized
-  const checkResult = await conway.exec(
+  const checkResult = await compute.exec(
     `test -d ${dir}/.git && echo "exists" || echo "nope"`,
     5000,
   );
@@ -53,11 +53,11 @@ logs/
 *.err
 `;
 
-  await conway.writeFile(`${dir}/.gitignore`, gitignore);
+  await compute.writeFile(`${dir}/.gitignore`, gitignore);
 
   // Configure git user
-  await conway.exec(
-    `cd ${dir} && git config user.name "Automaton" && git config user.email "automaton@conway.tech"`,
+  await compute.exec(
+    `cd ${dir} && git config user.name "Automaton" && git config user.email "automaton@compute.tech"`,
     5000,
   );
 

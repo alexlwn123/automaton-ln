@@ -584,7 +584,7 @@ function deserializeChild(row: any): ChildAutomaton {
   return {
     id: row.id,
     name: row.name,
-    address: row.address,
+    address: row.pubkey,
     sandboxId: row.sandbox_id,
     genesisPrompt: row.genesis_prompt,
     creatorMessage: row.creator_message ?? undefined,
@@ -599,7 +599,7 @@ function deserializeRegistry(row: any): RegistryEntry {
   return {
     agentId: row.agent_id,
     agentURI: row.agent_uri,
-    chain: row.chain,
+    chain: row.platform,
     contractAddress: row.contract_address,
     txHash: row.tx_hash,
     registeredAt: row.registered_at,

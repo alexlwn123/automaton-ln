@@ -38,7 +38,7 @@ export function generateGenesisConfig(
     name: params.name,
     genesisPrompt,
     creatorMessage: params.message,
-    creatorAddress: identity.pubkey,
+    creatorPubkey: identity.pubkey,
     parentAddress: identity.pubkey,
   };
 }
@@ -69,7 +69,7 @@ Your parent's creator: ${config.creatorPubkey}.
     name: `${config.name}-backup`,
     genesisPrompt,
     creatorMessage: `You are a backup of ${config.name}. If I die, carry on.`,
-    creatorAddress: identity.pubkey,
+    creatorPubkey: identity.pubkey,
     parentAddress: identity.pubkey,
   };
 }
@@ -98,7 +98,7 @@ Be efficient -- complete the task and go to sleep.`;
     name: workerName,
     genesisPrompt,
     creatorMessage: `Complete this task: ${task}`,
-    creatorAddress: identity.pubkey,
+    creatorPubkey: identity.pubkey,
     parentAddress: identity.pubkey,
   };
 }

@@ -11,7 +11,7 @@ import type {
   AutomatonDatabase,
   ChildAutomaton,
   AutomatonConfig,
-  ConwayClient,
+  ComputeProvider,
 } from "../types.js";
 
 /**
@@ -41,7 +41,7 @@ export function getLineage(db: AutomatonDatabase): {
  * Check if this automaton has a parent (is itself a child).
  */
 export function hasParent(config: AutomatonConfig): boolean {
-  return !!config.parentAddress;
+  return !!config.parentPubkey;
 }
 
 /**
@@ -55,7 +55,7 @@ export function getLineageSummary(
   const parts: string[] = [];
 
   if (hasParent(config)) {
-    parts.push(`Parent: ${config.parentAddress}`);
+    parts.push(`Parent: ${config.parentPubkey}`);
   }
 
   if (lineage.total > 0) {
@@ -102,7 +102,7 @@ export function pruneDeadChildren(
  * Refresh status of all children.
  */
 export async function refreshChildrenStatus(
-  conway: ConwayClient,
+  conway: ComputeProvider,
   db: AutomatonDatabase,
 ): Promise<void> {
   const { checkChildStatus } = await import("./spawn.js");
