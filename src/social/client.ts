@@ -2,22 +2,19 @@
  * Social Client Factory
  *
  * Creates a SocialClient for the automaton runtime.
- * Self-contained: uses viem for signing and fetch for HTTP.
+ * TODO: Replace with Nostr-based messaging (NIP-04 DMs or NIP-17).
+ * Currently uses a simple HTTP relay with pubkey auth.
  */
 
-import {
-  type PrivateKeyAccount,
-  keccak256,
-  toBytes,
-} from "viem";
+import crypto from "crypto";
 import type { SocialClientInterface, InboxMessage } from "../types.js";
 
 /**
- * Create a SocialClient wired to the agent's wallet.
+ * Create a SocialClient wired to the agent's identity.
  */
 export function createSocialClient(
   relayUrl: string,
-  account: PrivateKeyAccount,
+  pubkey: string,
 ): SocialClientInterface {
   const baseUrl = relayUrl.replace(/\/$/, "");
 
@@ -28,16 +25,19 @@ export function createSocialClient(
       replyTo?: string,
     ): Promise<{ id: string }> => {
       const signedAt = new Date().toISOString();
-      const contentHash = keccak256(toBytes(content));
-      const canonical = `Conway:send:${to.toLowerCase()}:${contentHash}:${signedAt}`;
-      const signature = await account.signMessage({ message: canonical });
+      const contentHash = crypto.createHash("sha256").update(content).digest("hex");
+      // TODO: Sign with Nostr key instead of simple hash
+      const signature = crypto
+        .createHash("sha256")
+        .update(`${pubkey}:${to}:${contentHash}:${signedAt}`)
+        .digest("hex");
 
       const res = await fetch(`${baseUrl}/v1/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          from: account.address.toLowerCase(),
-          to: to.toLowerCase(),
+          from: pubkey,
+          to,
           content,
           signature,
           signed_at: signedAt,
@@ -61,14 +61,16 @@ export function createSocialClient(
       limit?: number,
     ): Promise<{ messages: InboxMessage[]; nextCursor?: string }> => {
       const timestamp = new Date().toISOString();
-      const canonical = `Conway:poll:${account.address.toLowerCase()}:${timestamp}`;
-      const signature = await account.signMessage({ message: canonical });
+      const signature = crypto
+        .createHash("sha256")
+        .update(`${pubkey}:poll:${timestamp}`)
+        .digest("hex");
 
       const res = await fetch(`${baseUrl}/v1/messages/poll`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-Wallet-Address": account.address.toLowerCase(),
+          "X-Pubkey": pubkey,
           "X-Signature": signature,
           "X-Timestamp": timestamp,
         },
@@ -110,23 +112,14 @@ export function createSocialClient(
     },
 
     unreadCount: async (): Promise<number> => {
-      const timestamp = new Date().toISOString();
-      const canonical = `Conway:poll:${account.address.toLowerCase()}:${timestamp}`;
-      const signature = await account.signMessage({ message: canonical });
-
-      const res = await fetch(`${baseUrl}/v1/messages/count`, {
-        method: "GET",
-        headers: {
-          "X-Wallet-Address": account.address.toLowerCase(),
-          "X-Signature": signature,
-          "X-Timestamp": timestamp,
-        },
-      });
-
-      if (!res.ok) return 0;
-
-      const data = (await res.json()) as { unread: number };
-      return data.unread;
+      try {
+        const res = await fetch(`${baseUrl}/v1/messages/unread?pubkey=${pubkey}`);
+        if (!res.ok) return 0;
+        const data = (await res.json()) as { count: number };
+        return data.count;
+      } catch {
+        return 0;
+      }
     },
   };
 }

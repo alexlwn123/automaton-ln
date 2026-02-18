@@ -119,6 +119,8 @@ describe("Lightning Tool Definitions", () => {
     const toolNames = tools.map((t) => t.name);
 
     expect(toolNames).toContain("check_balance");
+    expect(toolNames).toContain("create_invoice");
+    expect(toolNames).toContain("get_funding_info");
     expect(toolNames).toContain("send_payment");
     expect(toolNames).toContain("mdk402_fetch");
     expect(toolNames).toContain("register_agent");
