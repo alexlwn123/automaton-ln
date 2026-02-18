@@ -24,6 +24,9 @@ describe("Agent Loop", () => {
   let identity: ReturnType<typeof createTestIdentity>;
   let config: ReturnType<typeof createTestConfig>;
 
+  // Mock balance: 100,000 sats (healthy)
+  const mockGetBalance = async () => 100_000;
+
   beforeEach(() => {
     db = createTestDb();
     compute = new MockComputeProvider();
@@ -46,6 +49,7 @@ describe("Agent Loop", () => {
     const turns: AgentTurn[] = [];
 
     await runAgentLoop({
+      getBalanceOverride: mockGetBalance,
       identity,
       config,
       db,
@@ -79,6 +83,7 @@ describe("Agent Loop", () => {
     const turns: AgentTurn[] = [];
 
     await runAgentLoop({
+      getBalanceOverride: mockGetBalance,
       identity,
       config,
       db,
@@ -100,13 +105,14 @@ describe("Agent Loop", () => {
   });
 
   it("low credits forces low-compute mode", async () => {
-    compute.creditsCents = 50; // Below $1 threshold -> critical
+    const lowBalance = async () => 5000; // In critical tier (1001-10000 sats)
 
     const inference = new MockInferenceClient([
       noToolResponse("Low on credits."),
     ]);
 
     await runAgentLoop({
+      getBalanceOverride: lowBalance,
       identity,
       config,
       db,
@@ -125,6 +131,7 @@ describe("Agent Loop", () => {
     ]);
 
     await runAgentLoop({
+      getBalanceOverride: mockGetBalance,
       identity,
       config,
       db,
@@ -142,6 +149,7 @@ describe("Agent Loop", () => {
     ]);
 
     await runAgentLoop({
+      getBalanceOverride: mockGetBalance,
       identity,
       config,
       db,
@@ -176,6 +184,7 @@ describe("Agent Loop", () => {
     const turns: AgentTurn[] = [];
 
     await runAgentLoop({
+      getBalanceOverride: mockGetBalance,
       identity,
       config,
       db,

@@ -115,8 +115,8 @@ export const CREATE_TABLES = `
   CREATE TABLE IF NOT EXISTS children (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
-    address TEXT NOT NULL,
-    sandbox_id TEXT NOT NULL,
+    address TEXT,
+    sandbox_id TEXT,
     genesis_prompt TEXT NOT NULL,
     creator_message TEXT,
     funded_amount_cents INTEGER NOT NULL DEFAULT 0,
@@ -125,13 +125,13 @@ export const CREATE_TABLES = `
     last_checked TEXT
   );
 
-  -- ERC-8004 registration state
+  -- Agent registry state (Nostr NIP-89 or other)
   CREATE TABLE IF NOT EXISTS registry (
     agent_id TEXT PRIMARY KEY,
     agent_uri TEXT NOT NULL,
-    chain TEXT NOT NULL DEFAULT 'eip155:8453',
-    contract_address TEXT NOT NULL,
-    tx_hash TEXT NOT NULL,
+    chain TEXT,
+    contract_address TEXT,
+    tx_hash TEXT,
     registered_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
@@ -200,8 +200,8 @@ export const MIGRATION_V2 = `
   CREATE TABLE IF NOT EXISTS children (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
-    address TEXT NOT NULL,
-    sandbox_id TEXT NOT NULL,
+    address TEXT,
+    sandbox_id TEXT,
     genesis_prompt TEXT NOT NULL,
     creator_message TEXT,
     funded_amount_cents INTEGER NOT NULL DEFAULT 0,
@@ -213,9 +213,9 @@ export const MIGRATION_V2 = `
   CREATE TABLE IF NOT EXISTS registry (
     agent_id TEXT PRIMARY KEY,
     agent_uri TEXT NOT NULL,
-    chain TEXT NOT NULL DEFAULT 'eip155:8453',
-    contract_address TEXT NOT NULL,
-    tx_hash TEXT NOT NULL,
+    chain TEXT,
+    contract_address TEXT,
+    tx_hash TEXT,
     registered_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 

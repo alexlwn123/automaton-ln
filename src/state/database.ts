@@ -584,8 +584,8 @@ function deserializeChild(row: any): ChildAutomaton {
   return {
     id: row.id,
     name: row.name,
-    pubkey: row.pubkey,
-    sandboxId: row.sandbox_id,
+    pubkey: row.address, // DB column is still 'address'
+    sandboxId: row.sandbox_id ?? undefined,
     genesisPrompt: row.genesis_prompt,
     creatorMessage: row.creator_message ?? undefined,
     fundedAmountSats: row.funded_amount_cents,
@@ -599,7 +599,7 @@ function deserializeRegistry(row: any): RegistryEntry {
   return {
     agentId: row.agent_id,
     agentURI: row.agent_uri,
-    platform: row.platform ?? undefined,
+    platform: row.chain ?? undefined, // DB column is still 'chain'
     registeredAt: row.registered_at,
   };
 }

@@ -45,6 +45,8 @@ export interface AgentLoopOptions {
   skills?: Skill[];
   onStateChange?: (state: AgentState) => void;
   onTurnComplete?: (turn: AgentTurn) => void;
+  /** Override balance provider for testing */
+  getBalanceOverride?: () => Promise<number>;
 }
 
 /**
@@ -54,7 +56,7 @@ export interface AgentLoopOptions {
 export async function runAgentLoop(
   options: AgentLoopOptions,
 ): Promise<void> {
-  const { identity, config, db, compute, inference, social, skills, onStateChange, onTurnComplete } =
+  const { identity, config, db, compute, inference, social, skills, onStateChange, onTurnComplete, getBalanceOverride } =
     options;
 
   const tools = createBuiltinTools(identity.sandboxId || "local");
@@ -80,7 +82,8 @@ export async function runAgentLoop(
   onStateChange?.("waking");
 
   // Get financial state
-  let financial = await getFinancialState();
+  const getBalanceFn = getBalanceOverride || getBalance;
+  let financial = await getFinancialStateFn(getBalanceFn);
 
   // Check if this is the first run
   const isFirstRun = db.getTurnCount() === 0;
@@ -131,7 +134,7 @@ export async function runAgentLoop(
       }
 
       // Refresh financial state periodically
-      financial = await getFinancialState();
+      financial = await getFinancialStateFn(getBalanceFn);
 
       // Check survival tier
       const tier = getSurvivalTier(financial.balanceSats);
@@ -309,10 +312,10 @@ export async function runAgentLoop(
 
 // ─── Helpers ───────────────────────────────────────────────────
 
-async function getFinancialState(): Promise<FinancialState> {
+async function getFinancialStateFn(getBalanceFn: () => Promise<number>): Promise<FinancialState> {
   let balanceSats = 0;
   try {
-    balanceSats = await getBalance();
+    balanceSats = await getBalanceFn();
   } catch {}
   return {
     balanceSats,
