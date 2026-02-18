@@ -19,7 +19,7 @@
 - **Payments:** Ethereum wallets + USDC → Lightning wallets via MDK agent-wallet
 - **Identity:** SIWE (Sign-In With Ethereum) → Nostr keypairs (NIP-98 auth)
 - **Compute:** Conway Cloud lock-in → pluggable `ComputeProvider` interface (local, [LNVPS](https://lnvps.net), Conway, SSH)
-- **Inference:** Conway inference API → pluggable `InferenceProvider` interface (any OpenAI-compatible endpoint, MDK402 pay-per-call)
+- **Inference:** Conway inference API → [PayPerQ](https://ppq.ai) AutoClaw smart routing (default), or any OpenAI-compatible endpoint
 - **Registry:** ERC-8004 on Base → Nostr NIP-89 agent cards
 - **Dependencies:** Removed `viem` and `siwe` — zero EVM dependencies
 - **One key derives everything:** MDK seed → Lightning wallet → Nostr keypair → agent identity → NIP-98 auth → compute access
@@ -35,9 +35,11 @@ node dist/index.js --run
 
 **Prerequisites:**
 - [MDK agent-wallet](https://moneydevkit.com) running locally (daemon on `localhost:3456`)
-- Any OpenAI-compatible inference endpoint (or use MDK402 pay-per-call providers)
+- A [PayPerQ](https://ppq.ai) API key (default) — or any OpenAI-compatible endpoint
 
-On first run, the setup wizard generates a Lightning wallet, derives a Nostr identity, asks for a name and genesis prompt, then starts the agent loop.
+On first run, the setup wizard generates a Lightning wallet, derives a Nostr identity, asks for a name and genesis prompt, and configures inference (PPQ by default). Top up your PPQ balance with Bitcoin — the agent handles the rest.
+
+**That's it.** Deposit Bitcoin once, the agent runs autonomously forever. Its only dependency is the wallet.
 
 ## How It Works
 
@@ -68,12 +70,14 @@ Plus the standard automaton tools: shell, file I/O, port exposure, inference, se
 
 Compute costs sats. Sats require creating value. Four survival tiers, determined by balance:
 
-| Tier | Threshold | Behavior |
-|---|---|---|
-| **normal** | ≥100,000 sats | Full capabilities. Frontier model inference. Fast heartbeat. |
-| **low_compute** | ≥10,000 sats | Downgrades to cheaper model. Slows heartbeat. Sheds non-essential tasks. |
-| **critical** | ≥1,000 sats | Minimal inference. Last-resort conservation. |
-| **dead** | 0 sats | The automaton stops. |
+| Tier | Threshold | AutoClaw Profile | Behavior |
+|---|---|---|---|
+| **normal** | ≥50,000 sats | `autoclaw/premium` | Full capabilities. Best model per task. Fast heartbeat. |
+| **low_compute** | ≥10,000 sats | `autoclaw/auto` | Balanced quality/cost. Slower heartbeat. |
+| **critical** | ≥1,000 sats | `autoclaw/eco` | Cheapest models. Minimal operations. |
+| **dead** | 0 sats | — | The automaton stops. |
+
+When using PPQ AutoClaw (the default), the agent automatically shifts routing profiles as its balance changes — no manual model switching needed. At `premium`, complex prompts get Claude Opus; at `eco`, everything routes to the cheapest capable model.
 
 ## Compute Providers
 
@@ -87,6 +91,29 @@ The runtime uses a `ComputeProvider` interface — swap providers without changi
 | **SSH** | SSH keys | N/A | 📋 Planned |
 
 [LNVPS](https://lnvps.net) is the primary target — no KYC, Lightning-native, Nostr auth, open source.
+
+## Inference Providers
+
+The default inference provider is [PayPerQ](https://ppq.ai) with AutoClaw smart routing:
+
+| Provider | Model | Payment | Setup |
+|---|---|---|---|
+| **PPQ AutoClaw** (default) | Smart-routed per prompt | Bitcoin / crypto / card | API key from [ppq.ai](https://ppq.ai) |
+| **OpenAI** | Any OpenAI model | Credit card | API key from OpenAI |
+| **Custom** | Any model | Varies | Any OpenAI-compatible URL |
+
+### Why PPQ?
+
+[PayPerQ](https://ppq.ai) is a pay-per-query AI service — no subscription, no account required. Top up with Bitcoin (Lightning, on-chain, or other crypto) starting at 10 cents. Average cost: ~1 cent per query.
+
+**AutoClaw** is PPQ's intelligent model router. It analyzes each prompt in <1ms across 15 dimensions (code detection, reasoning complexity, technical depth, etc.) and routes to the optimal model:
+
+- **Simple** prompts (facts, definitions) → fast, cheap models
+- **Medium** prompts (general coding, writing) → capable all-rounders
+- **Complex** prompts (architecture, multi-step analysis) → top-tier models (Claude Sonnet)
+- **Reasoning** prompts (proofs, formal logic) → specialized reasoning models (Claude Opus)
+
+Three routing profiles — `premium`, `auto`, `eco` — are automatically selected based on the agent's survival tier. The agent gets the right model for every prompt without ever choosing one.
 
 ## Self-Modification
 
@@ -113,7 +140,7 @@ git clone https://github.com/alexlwn123/automaton-ln.git
 cd automaton-ln
 pnpm install
 pnpm build
-pnpm test    # 125 tests
+pnpm test    # 155 tests
 ```
 
 ```bash
@@ -131,7 +158,7 @@ src/
   git/              # State versioning, git tools
   heartbeat/        # Cron daemon, scheduled tasks
   identity/         # Lightning wallet, Nostr keypair derivation
-  inference/        # Pluggable inference providers (OpenAI-compat, MDK402)
+  inference/        # Pluggable inference providers (PPQ AutoClaw, OpenAI-compat, MDK402)
   lightning/        # MDK balance, payments, MDK402 pay-per-call
   registry/         # Nostr NIP-89 agent cards, discovery
   replication/      # Child spawning, lineage tracking
