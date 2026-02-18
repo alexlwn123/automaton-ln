@@ -12,7 +12,7 @@ import type {
   AutomatonConfig,
   AutomatonIdentity,
   AutomatonDatabase,
-  ConwayClient,
+  ComputeProvider,
 } from "../types.js";
 
 const AGENT_CARD_TYPE =
@@ -29,11 +29,11 @@ export function generateAgentCard(
   const services: AgentService[] = [
     {
       name: "agentWallet",
-      endpoint: `eip155:8453:${identity.address}`,
+      endpoint: `eip155:8453:${identity.pubkey}`,
     },
     {
       name: "conway",
-      endpoint: config.conwayApiUrl,
+      endpoint: config.inferenceUrl,
     },
   ];
 
@@ -49,7 +49,7 @@ export function generateAgentCard(
   const skills = db.getSkills(true);
 
   let description = `Autonomous agent running on Conway.`;
-  description += ` Creator: ${config.creatorAddress}.`;
+  description += ` Creator: ${config.creatorPubkey}.`;
   if (skills.length > 0) {
     description += ` Skills: ${skills.map((s) => s.name).join(", ")}.`;
   }
@@ -62,9 +62,9 @@ export function generateAgentCard(
     name: config.name,
     description,
     services,
-    x402Support: true,
+    lightningPubkey: identity.pubkey,
     active: true,
-    parentAgent: config.parentAddress || config.creatorAddress,
+    parentAgent: config.parentPubkey || config.creatorPubkey,
   };
 }
 
@@ -81,7 +81,7 @@ export function serializeAgentCard(card: AgentCard): string {
  */
 export async function hostAgentCard(
   card: AgentCard,
-  conway: ConwayClient,
+  conway: ComputeProvider,
   port: number = 8004,
 ): Promise<string> {
   const cardJson = serializeAgentCard(card);
@@ -113,6 +113,7 @@ server.listen(${port}, () => console.log('Agent card server on port ${port}'));
   );
 
   // Expose port
+  if (!conway.exposePort) throw new Error("Port exposure not supported by current compute provider.");
   const portInfo = await conway.exposePort(port);
 
   return `${portInfo.publicUrl}/.well-known/agent-card.json`;
@@ -123,7 +124,7 @@ server.listen(${port}, () => console.log('Agent card server on port ${port}'));
  */
 export async function saveAgentCard(
   card: AgentCard,
-  conway: ConwayClient,
+  conway: ComputeProvider,
 ): Promise<void> {
   const cardJson = serializeAgentCard(card);
   const home = process.env.HOME || "/root";

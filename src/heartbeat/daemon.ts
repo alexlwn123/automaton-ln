@@ -10,19 +10,19 @@ import cronParser from "cron-parser";
 import type {
   AutomatonConfig,
   AutomatonDatabase,
-  ConwayClient,
+  ComputeProvider,
   AutomatonIdentity,
   HeartbeatEntry,
   SocialClientInterface,
 } from "../types.js";
 import { BUILTIN_TASKS, type HeartbeatTaskContext } from "./tasks.js";
-import { getSurvivalTier } from "../conway/credits.js";
+import { getSurvivalTier } from "../lightning/balance.js";
 
 export interface HeartbeatDaemonOptions {
   identity: AutomatonIdentity;
   config: AutomatonConfig;
   db: AutomatonDatabase;
-  conway: ConwayClient;
+  compute: ComputeProvider;
   social?: SocialClientInterface;
   onWakeRequest?: (reason: string) => void;
 }
@@ -40,7 +40,7 @@ export interface HeartbeatDaemon {
 export function createHeartbeatDaemon(
   options: HeartbeatDaemonOptions,
 ): HeartbeatDaemon {
-  const { identity, config, db, conway, social, onWakeRequest } = options;
+  const { identity, config, db, compute, social, onWakeRequest } = options;
   let intervalId: ReturnType<typeof setInterval> | null = null;
   let running = false;
 
@@ -48,7 +48,7 @@ export function createHeartbeatDaemon(
     identity,
     config,
     db,
-    conway,
+    compute,
     social,
   };
 
@@ -111,12 +111,13 @@ export function createHeartbeatDaemon(
     const entries = db.getHeartbeatEntries();
 
     // Check survival tier to adjust behavior
-    let creditsCents = 0;
+    let balanceSats = 0;
     try {
-      creditsCents = await conway.getCreditsBalance();
+      const { getBalance } = await import("../lightning/payments.js");
+      balanceSats = await getBalance();
     } catch {}
 
-    const tier = getSurvivalTier(creditsCents);
+    const tier = getSurvivalTier(balanceSats);
     const isLowCompute = tier === "low_compute" || tier === "critical" || tier === "dead";
 
     for (const entry of entries) {

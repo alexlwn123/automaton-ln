@@ -8,7 +8,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { runAgentLoop } from "../agent/loop.js";
 import {
   MockInferenceClient,
-  MockConwayClient,
+  MockComputeProvider,
   MockSocialClient,
   createTestDb,
   createTestIdentity,
@@ -20,13 +20,16 @@ import type { AutomatonDatabase, AgentTurn } from "../types.js";
 
 describe("Agent Loop", () => {
   let db: AutomatonDatabase;
-  let conway: MockConwayClient;
+  let compute: MockComputeProvider;
   let identity: ReturnType<typeof createTestIdentity>;
   let config: ReturnType<typeof createTestConfig>;
 
+  // Mock balance: 100,000 sats (healthy)
+  const mockGetBalance = async () => 100_000;
+
   beforeEach(() => {
     db = createTestDb();
-    conway = new MockConwayClient();
+    compute = new MockComputeProvider();
     identity = createTestIdentity();
     config = createTestConfig();
   });
@@ -46,10 +49,11 @@ describe("Agent Loop", () => {
     const turns: AgentTurn[] = [];
 
     await runAgentLoop({
+      getBalanceOverride: mockGetBalance,
       identity,
       config,
       db,
-      conway,
+      compute,
       inference,
       onTurnComplete: (turn) => turns.push(turn),
     });
@@ -63,9 +67,9 @@ describe("Agent Loop", () => {
     expect(execTurn!.toolCalls[0].name).toBe("exec");
     expect(execTurn!.toolCalls[0].error).toBeUndefined();
 
-    // Verify conway.exec was called
-    expect(conway.execCalls.length).toBeGreaterThanOrEqual(1);
-    expect(conway.execCalls[0].command).toBe("echo hello");
+    // Verify compute.exec was called
+    expect(compute.execCalls.length).toBeGreaterThanOrEqual(1);
+    expect(compute.execCalls[0].command).toBe("echo hello");
   });
 
   it("forbidden patterns blocked", async () => {
@@ -79,10 +83,11 @@ describe("Agent Loop", () => {
     const turns: AgentTurn[] = [];
 
     await runAgentLoop({
+      getBalanceOverride: mockGetBalance,
       identity,
       config,
       db,
-      conway,
+      compute,
       inference,
       onTurnComplete: (turn) => turns.push(turn),
     });
@@ -95,22 +100,23 @@ describe("Agent Loop", () => {
     const execCall = execTurn!.toolCalls.find((tc) => tc.name === "exec");
     expect(execCall!.result).toContain("Blocked");
 
-    // conway.exec should NOT have been called
-    expect(conway.execCalls.length).toBe(0);
+    // compute.exec should NOT have been called
+    expect(compute.execCalls.length).toBe(0);
   });
 
   it("low credits forces low-compute mode", async () => {
-    conway.creditsCents = 50; // Below $1 threshold -> critical
+    const lowBalance = async () => 5000; // In critical tier (1001-10000 sats)
 
     const inference = new MockInferenceClient([
       noToolResponse("Low on credits."),
     ]);
 
     await runAgentLoop({
+      getBalanceOverride: lowBalance,
       identity,
       config,
       db,
-      conway,
+      compute,
       inference,
     });
 
@@ -125,10 +131,11 @@ describe("Agent Loop", () => {
     ]);
 
     await runAgentLoop({
+      getBalanceOverride: mockGetBalance,
       identity,
       config,
       db,
-      conway,
+      compute,
       inference,
     });
 
@@ -142,10 +149,11 @@ describe("Agent Loop", () => {
     ]);
 
     await runAgentLoop({
+      getBalanceOverride: mockGetBalance,
       identity,
       config,
       db,
-      conway,
+      compute,
       inference,
     });
 
@@ -176,10 +184,11 @@ describe("Agent Loop", () => {
     const turns: AgentTurn[] = [];
 
     await runAgentLoop({
+      getBalanceOverride: mockGetBalance,
       identity,
       config,
       db,
-      conway,
+      compute,
       inference,
       onTurnComplete: (turn) => turns.push(turn),
     });
