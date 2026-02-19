@@ -47,6 +47,13 @@ export interface AgentLoopOptions {
   onTurnComplete?: (turn: AgentTurn) => void;
   /** Override balance provider for testing */
   getBalanceOverride?: () => Promise<number>;
+  /** Override tool execution for testing. Return a fake result string, or throw to simulate errors. */
+  executeToolOverride?: (
+    toolName: string,
+    args: Record<string, unknown>,
+  ) => Promise<string>;
+  /** Max turns before force-exiting the loop (for testing). Default: unlimited. */
+  maxTurns?: number;
 }
 
 /**
@@ -56,7 +63,7 @@ export interface AgentLoopOptions {
 export async function runAgentLoop(
   options: AgentLoopOptions,
 ): Promise<void> {
-  const { identity, config, db, compute, inference, social, skills, onStateChange, onTurnComplete, getBalanceOverride } =
+  const { identity, config, db, compute, inference, social, skills, onStateChange, onTurnComplete, getBalanceOverride, executeToolOverride, maxTurns } =
     options;
 
   const tools = createBuiltinTools(identity.sandboxId || "local");
@@ -75,6 +82,7 @@ export async function runAgentLoop(
   }
 
   let consecutiveErrors = 0;
+  let turnNumber = 0;
   let running = true;
 
   // Transition to waking state
@@ -227,12 +235,36 @@ export async function runAgentLoop(
 
           log(config, `[TOOL] ${tc.function.name}(${JSON.stringify(args).slice(0, 100)})`);
 
-          const result = await executeTool(
-            tc.function.name,
-            args,
-            tools,
-            toolContext,
-          );
+          let result: ToolCallResult;
+          if (executeToolOverride) {
+            const startTime = Date.now();
+            try {
+              const fakeResult = await executeToolOverride(tc.function.name, args);
+              result = {
+                id: tc.id,
+                name: tc.function.name,
+                arguments: args,
+                result: fakeResult,
+                durationMs: Date.now() - startTime,
+              };
+            } catch (err: any) {
+              result = {
+                id: tc.id,
+                name: tc.function.name,
+                arguments: args,
+                result: "",
+                durationMs: Date.now() - startTime,
+                error: err.message || String(err),
+              };
+            }
+          } else {
+            result = await executeTool(
+              tc.function.name,
+              args,
+              tools,
+              toolContext,
+            );
+          }
 
           // Override the ID to match the inference call's ID
           result.id = tc.id;
@@ -253,6 +285,16 @@ export async function runAgentLoop(
         db.insertToolCall(turn.id, tc);
       }
       onTurnComplete?.(turn);
+      turnNumber++;
+
+      // Check maxTurns limit (for testing)
+      if (maxTurns !== undefined && turnNumber >= maxTurns) {
+        log(config, `[TEST] maxTurns (${maxTurns}) reached. Exiting loop.`);
+        db.setAgentState("sleeping");
+        onStateChange?.("sleeping");
+        running = false;
+        break;
+      }
 
       // Log the turn
       if (turn.thinking) {
