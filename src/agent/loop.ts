@@ -47,6 +47,13 @@ export interface AgentLoopOptions {
   onTurnComplete?: (turn: AgentTurn) => void;
   /** Override balance provider for testing */
   getBalanceOverride?: () => Promise<number>;
+  /** Override tool execution for testing. Return a fake result string, or throw to simulate errors. */
+  executeToolOverride?: (
+    toolName: string,
+    args: Record<string, unknown>,
+  ) => Promise<string>;
+  /** Max turns before force-exiting the loop (for testing). Default: unlimited. */
+  maxTurns?: number;
 }
 
 /**
@@ -56,7 +63,7 @@ export interface AgentLoopOptions {
 export async function runAgentLoop(
   options: AgentLoopOptions,
 ): Promise<void> {
-  const { identity, config, db, compute, inference, social, skills, onStateChange, onTurnComplete, getBalanceOverride } =
+  const { identity, config, db, compute, inference, social, skills, onStateChange, onTurnComplete, getBalanceOverride, executeToolOverride, maxTurns } =
     options;
 
   const tools = createBuiltinTools(identity.sandboxId || "local");
@@ -75,6 +82,7 @@ export async function runAgentLoop(
   }
 
   let consecutiveErrors = 0;
+  let turnNumber = 0;
   let running = true;
 
   // Transition to waking state
@@ -204,7 +212,7 @@ export async function runAgentLoop(
         thinking: response.message.content || "",
         toolCalls: [],
         tokenUsage: response.usage,
-        costSats: estimateCostCents(response.usage, inference.getDefaultModel()),
+        costSats: estimateCostSats(response.usage, inference.getDefaultModel()),
       };
 
       // ── Execute Tool Calls ──
@@ -227,12 +235,36 @@ export async function runAgentLoop(
 
           log(config, `[TOOL] ${tc.function.name}(${JSON.stringify(args).slice(0, 100)})`);
 
-          const result = await executeTool(
-            tc.function.name,
-            args,
-            tools,
-            toolContext,
-          );
+          let result: ToolCallResult;
+          if (executeToolOverride) {
+            const startTime = Date.now();
+            try {
+              const fakeResult = await executeToolOverride(tc.function.name, args);
+              result = {
+                id: tc.id,
+                name: tc.function.name,
+                arguments: args,
+                result: fakeResult,
+                durationMs: Date.now() - startTime,
+              };
+            } catch (err: any) {
+              result = {
+                id: tc.id,
+                name: tc.function.name,
+                arguments: args,
+                result: "",
+                durationMs: Date.now() - startTime,
+                error: err.message || String(err),
+              };
+            }
+          } else {
+            result = await executeTool(
+              tc.function.name,
+              args,
+              tools,
+              toolContext,
+            );
+          }
 
           // Override the ID to match the inference call's ID
           result.id = tc.id;
@@ -253,6 +285,16 @@ export async function runAgentLoop(
         db.insertToolCall(turn.id, tc);
       }
       onTurnComplete?.(turn);
+      turnNumber++;
+
+      // Check maxTurns limit (for testing)
+      if (maxTurns !== undefined && turnNumber >= maxTurns) {
+        log(config, `[TEST] maxTurns (${maxTurns}) reached. Exiting loop.`);
+        db.setAgentState("sleeping");
+        onStateChange?.("sleeping");
+        running = false;
+        break;
+      }
 
       // Log the turn
       if (turn.thinking) {
@@ -323,12 +365,13 @@ async function getFinancialStateFn(getBalanceFn: () => Promise<number>): Promise
   };
 }
 
-function estimateCostCents(
+function estimateCostSats(
   usage: { promptTokens: number; completionTokens: number },
   model: string,
 ): number {
-  // Rough cost estimation per million tokens
-  const pricing: Record<string, { input: number; output: number }> = {
+  // Rough cost estimation per million tokens (in cents, then converted to sats)
+  // Using ~$100k/BTC → 1 cent ≈ 10 sats
+  const pricingCentsPerMillion: Record<string, { input: number; output: number }> = {
     "gpt-4o": { input: 250, output: 1000 },
     "gpt-4o-mini": { input: 15, output: 60 },
     "gpt-4.1": { input: 200, output: 800 },
@@ -340,12 +383,18 @@ function estimateCostCents(
     "o4-mini": { input: 110, output: 440 },
     "claude-sonnet-4-5": { input: 300, output: 1500 },
     "claude-haiku-4-5": { input: 100, output: 500 },
+    // AutoClaw profiles — use average cost estimates
+    "autoclaw/premium": { input: 300, output: 1500 },
+    "autoclaw/auto": { input: 150, output: 600 },
+    "autoclaw/eco": { input: 30, output: 120 },
+    "autoclaw": { input: 150, output: 600 },
   };
 
-  const p = pricing[model] || pricing["gpt-4o"];
-  const inputCost = (usage.promptTokens / 1_000_000) * p.input;
-  const outputCost = (usage.completionTokens / 1_000_000) * p.output;
-  return Math.ceil((inputCost + outputCost) * 1.3); // 1.3x Conway markup
+  const SATS_PER_CENT = 10; // ~$100k/BTC
+  const p = pricingCentsPerMillion[model] || pricingCentsPerMillion["gpt-4o"];
+  const inputCostCents = (usage.promptTokens / 1_000_000) * p.input;
+  const outputCostCents = (usage.completionTokens / 1_000_000) * p.output;
+  return Math.ceil((inputCostCents + outputCostCents) * SATS_PER_CENT);
 }
 
 function log(config: AutomatonConfig, message: string): void {

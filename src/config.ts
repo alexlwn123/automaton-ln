@@ -85,7 +85,7 @@ export function createConfig(params: {
   const inferenceProvider = params.inferenceProvider || "ppq";
   const inferenceUrl = params.inferenceUrl ||
     (inferenceProvider === "ppq" ? "https://api.ppq.ai" : "https://api.openai.com/v1");
-  const inferenceModel = inferenceProvider === "ppq" ? "autoclaw/auto" : (DEFAULT_CONFIG.inferenceModel || "gpt-4o");
+  const inferenceModel = inferenceProvider === "ppq" ? "autoclaw/auto" : "gpt-4o";
 
   return {
     name: params.name,

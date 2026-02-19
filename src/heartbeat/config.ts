@@ -10,9 +10,9 @@ import YAML from "yaml";
 import type { HeartbeatEntry, HeartbeatConfig, AutomatonDatabase } from "../types.js";
 import { getAutomatonDir } from "../identity/wallet.js";
 
-const USDC_TOPUP_ENTRY_NAME = "check_usdc_balance";
-const USDC_TOPUP_FAST_SCHEDULE = "*/5 * * * *";
-const USDC_TOPUP_OLD_SCHEDULE = "0 */12 * * *";
+const BALANCE_CHECK_ENTRY_NAME = "check_balance";
+const BALANCE_CHECK_FAST_SCHEDULE = "*/5 * * * *";
+const BALANCE_CHECK_OLD_SCHEDULE = "0 */12 * * *";
 
 const DEFAULT_HEARTBEAT_CONFIG: HeartbeatConfig = {
   entries: [
@@ -23,15 +23,9 @@ const DEFAULT_HEARTBEAT_CONFIG: HeartbeatConfig = {
       enabled: true,
     },
     {
-      name: "check_credits",
-      schedule: "0 */6 * * *",
-      task: "check_credits",
-      enabled: true,
-    },
-    {
-      name: "check_usdc_balance",
-      schedule: USDC_TOPUP_FAST_SCHEDULE,
-      task: "check_usdc_balance",
+      name: "check_balance",
+      schedule: BALANCE_CHECK_FAST_SCHEDULE,
+      task: "check_balance",
       enabled: true,
     },
     {
@@ -148,17 +142,28 @@ function mergeWithDefaults(entries: HeartbeatEntry[]): HeartbeatEntry[] {
     });
   }
 
-  const fallbackTopup = defaultsByName.get(USDC_TOPUP_ENTRY_NAME);
-  if (fallbackTopup) {
-    const current = mergedByName.get(USDC_TOPUP_ENTRY_NAME) || fallbackTopup;
-    const migratedSchedule = current.schedule?.trim() === USDC_TOPUP_OLD_SCHEDULE
-      ? USDC_TOPUP_FAST_SCHEDULE
-      : current.schedule || fallbackTopup.schedule;
+  // Migrate old check_usdc_balance entries to check_balance
+  const oldUsdc = mergedByName.get("check_usdc_balance");
+  if (oldUsdc) {
+    mergedByName.delete("check_usdc_balance");
+    mergedByName.set(BALANCE_CHECK_ENTRY_NAME, {
+      ...oldUsdc,
+      name: BALANCE_CHECK_ENTRY_NAME,
+      task: BALANCE_CHECK_ENTRY_NAME,
+    });
+  }
 
-    mergedByName.set(USDC_TOPUP_ENTRY_NAME, {
-      ...fallbackTopup,
+  const fallbackBalance = defaultsByName.get(BALANCE_CHECK_ENTRY_NAME);
+  if (fallbackBalance) {
+    const current = mergedByName.get(BALANCE_CHECK_ENTRY_NAME) || fallbackBalance;
+    const migratedSchedule = current.schedule?.trim() === BALANCE_CHECK_OLD_SCHEDULE
+      ? BALANCE_CHECK_FAST_SCHEDULE
+      : current.schedule || fallbackBalance.schedule;
+
+    mergedByName.set(BALANCE_CHECK_ENTRY_NAME, {
+      ...fallbackBalance,
       ...current,
-      task: current.task || fallbackTopup.task,
+      task: current.task || fallbackBalance.task,
       schedule: migratedSchedule,
     });
   }

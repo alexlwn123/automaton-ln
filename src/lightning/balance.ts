@@ -28,9 +28,9 @@ export async function checkFinancialState(): Promise<FinancialState> {
  * Determine the survival tier based on current balance in sats.
  */
 export function getSurvivalTier(balanceSats: number): SurvivalTier {
-  if (balanceSats > SURVIVAL_THRESHOLDS.normal) return "normal";
-  if (balanceSats > SURVIVAL_THRESHOLDS.low_compute) return "low_compute";
-  if (balanceSats > SURVIVAL_THRESHOLDS.critical) return "critical";
+  if (balanceSats >= SURVIVAL_THRESHOLDS.normal) return "normal";
+  if (balanceSats >= SURVIVAL_THRESHOLDS.low_compute) return "low_compute";
+  if (balanceSats >= SURVIVAL_THRESHOLDS.critical) return "critical";
   return "dead";
 }
 

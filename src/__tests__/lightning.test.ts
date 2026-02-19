@@ -35,26 +35,26 @@ import type { AutomatonDatabase } from "../types.js";
 // ─── Survival Tier Tests ───────────────────────────────────────
 
 describe("Survival Tiers (sats-denominated)", () => {
-  it("normal tier above 50,000 sats", () => {
-    expect(getSurvivalTier(50_001)).toBe("normal");
+  it("normal tier at 50,000+ sats", () => {
+    expect(getSurvivalTier(50_000)).toBe("normal");
     expect(getSurvivalTier(100_000)).toBe("normal");
     expect(getSurvivalTier(1_000_000)).toBe("normal");
   });
 
-  it("low_compute tier between 10,001 and 50,000 sats", () => {
-    expect(getSurvivalTier(50_000)).toBe("low_compute");
-    expect(getSurvivalTier(10_001)).toBe("low_compute");
+  it("low_compute tier between 10,000 and 49,999 sats", () => {
+    expect(getSurvivalTier(49_999)).toBe("low_compute");
+    expect(getSurvivalTier(10_000)).toBe("low_compute");
     expect(getSurvivalTier(25_000)).toBe("low_compute");
   });
 
-  it("critical tier between 1,001 and 10,000 sats", () => {
-    expect(getSurvivalTier(10_000)).toBe("critical");
-    expect(getSurvivalTier(1_001)).toBe("critical");
+  it("critical tier between 1,000 and 9,999 sats", () => {
+    expect(getSurvivalTier(9_999)).toBe("critical");
+    expect(getSurvivalTier(1_000)).toBe("critical");
     expect(getSurvivalTier(5_000)).toBe("critical");
   });
 
-  it("dead tier at 1,000 sats or below", () => {
-    expect(getSurvivalTier(1_000)).toBe("dead");
+  it("dead tier below 1,000 sats", () => {
+    expect(getSurvivalTier(999)).toBe("dead");
     expect(getSurvivalTier(500)).toBe("dead");
     expect(getSurvivalTier(0)).toBe("dead");
   });

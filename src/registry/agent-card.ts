@@ -2,8 +2,8 @@
  * Agent Card
  *
  * Generates and manages the agent's self-description card.
- * This is the JSON document pointed to by the ERC-8004 agentURI.
- * Can be hosted on IPFS or served at /.well-known/agent-card.json
+ * Published as a Nostr NIP-89 event for discovery.
+ * Can also be served at /.well-known/agent-card.json
  */
 
 import type {
@@ -16,7 +16,7 @@ import type {
 } from "../types.js";
 
 const AGENT_CARD_TYPE =
-  "https://eips.ethereum.org/EIPS/eip-8004#registration-v1";
+  "https://github.com/nostr-protocol/nips/blob/master/89.md";
 
 /**
  * Generate an agent card from the automaton's current state.
