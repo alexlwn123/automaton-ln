@@ -198,12 +198,13 @@ function createMockInference(): InferenceClient {
 type ProviderName = "openclaw" | "anthropic" | "openai" | "ppq" | "ollama" | "mock";
 
 function resolveInference(requested?: ProviderName): { name: ProviderName; client: InferenceClient } {
-  // Try OpenClaw first (reads Anthropic key from auth-profiles.json)
+  // Try OpenClaw first (routes through openclaw agent CLI → gateway → Claude)
   if (!requested || requested === "openclaw") {
-    const client = createOpenClawInference({ model: "claude-haiku-4-5-20241022" });
-    if (client) return { name: "openclaw", client };
+    if (isOpenClawInferenceAvailable()) {
+      return { name: "openclaw", client: createOpenClawInference() };
+    }
     if (requested === "openclaw") {
-      console.error("❌ No Anthropic key found in OpenClaw auth profiles.");
+      console.error("❌ openclaw CLI not found.");
       process.exit(1);
     }
   }
@@ -213,8 +214,6 @@ function resolveInference(requested?: ProviderName): { name: ProviderName; clien
     const key = process.env.ANTHROPIC_API_KEY;
     if (!key && requested === "anthropic") { console.error("❌ ANTHROPIC_API_KEY not set."); process.exit(1); }
     if (key) {
-      // Use the OpenClaw inference client but with explicit key override
-      // (it reads from auth-profiles, but if ANTHROPIC_API_KEY is set, the provider.ts would use it)
       return {
         name: "anthropic",
         client: createInferenceProvider({

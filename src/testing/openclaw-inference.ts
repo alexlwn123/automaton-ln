@@ -1,16 +1,25 @@
 /**
- * OpenClaw Inference Client
+ * OpenClaw Sub-Agent Inference Client
  *
- * An InferenceClient that uses the Anthropic API key from OpenClaw's
- * auth-profiles.json. This lets the sandbox test use the same Claude
- * access as OpenClaw without needing separate API keys.
+ * An InferenceClient that routes inference through OpenClaw's gateway
+ * using `openclaw agent`. This lets the sandbox test use Claude without
+ * needing separate API keys — it piggybacks on OpenClaw's existing auth.
  *
- * Talks to Anthropic's Messages API directly with proper tool schemas —
- * no text parsing, no regex, real structured tool calls.
+ * How it works:
+ *   1. Agent loop calls inference.chat(messages, {tools})
+ *   2. We format the messages + tool schemas into a single prompt
+ *   3. Send via `openclaw agent --session-id <id> --message <prompt> --json`
+ *   4. Claude responds with structured JSON tool calls
+ *   5. We parse them back into InferenceResponse format
+ *
+ * The sub-agent session is instructed to act as a raw inference engine:
+ * given a system prompt and tools, return tool calls as JSON — nothing else.
  */
 
+import { execSync } from "child_process";
 import fs from "fs";
 import path from "path";
+import os from "os";
 import type {
   InferenceClient,
   ChatMessage,
@@ -20,239 +29,238 @@ import type {
   TokenUsage,
 } from "../types.js";
 
-const AUTH_PROFILES_PATHS = [
-  path.join(process.env.HOME || "/root", ".openclaw/agents/main/agent/auth-profiles.json"),
-  path.join(process.env.HOME || "/root", ".openclaw/auth-profiles.json"),
-];
-
-const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
-const ANTHROPIC_VERSION = "2023-06-01";
+const SESSION_PREFIX = "automaton-sandbox-llm";
 
 /**
- * Load the Anthropic API key from OpenClaw's auth profiles.
+ * Call `openclaw agent` and get the response.
  */
-function loadAnthropicKey(): string | null {
-  for (const p of AUTH_PROFILES_PATHS) {
-    try {
-      if (!fs.existsSync(p)) continue;
-      const data = JSON.parse(fs.readFileSync(p, "utf-8"));
-      const profiles = data.profiles || {};
+function callOpenClawAgent(sessionId: string, message: string): { text: string; usage: any; model: string } {
+  // Write message to temp file to avoid shell escaping nightmares
+  const msgFile = path.join(os.tmpdir(), `oc-inference-${Date.now()}.txt`);
+  fs.writeFileSync(msgFile, message);
 
-      // Look for any anthropic profile
-      for (const [, profile] of Object.entries(profiles) as [string, any][]) {
-        if (profile.provider === "anthropic" && profile.token) {
-          return profile.token;
-        }
-      }
-    } catch {
-      continue;
+  try {
+    // Use cat to pipe the message, avoiding shell interpolation entirely
+    const result = execSync(
+      `openclaw agent --session-id "${sessionId}" --message "$(cat '${msgFile}')" --json 2>/dev/null`,
+      { encoding: "utf-8", timeout: 120_000, maxBuffer: 10 * 1024 * 1024 },
+    );
+
+    const parsed = JSON.parse(result);
+    return {
+      text: parsed.payloads?.[0]?.text || "",
+      usage: parsed.meta?.agentMeta?.usage || {},
+      model: parsed.meta?.agentMeta?.model || "unknown",
+    };
+  } catch (err: any) {
+    // Try reading stdout even on non-zero exit
+    const stdout = err.stdout?.toString?.() || "";
+    if (stdout.includes('"payloads"')) {
+      try {
+        const parsed = JSON.parse(stdout);
+        return {
+          text: parsed.payloads?.[0]?.text || "",
+          usage: parsed.meta?.agentMeta?.usage || {},
+          model: parsed.meta?.agentMeta?.model || "unknown",
+        };
+      } catch {}
     }
+    throw new Error(`openclaw agent failed: ${err.message?.slice(0, 200)}`);
+  } finally {
+    try { fs.unlinkSync(msgFile); } catch {}
   }
-  return null;
 }
 
 /**
- * Convert OpenAI-format tool schemas to Anthropic format.
+ * Format tool schemas for embedding in a text prompt.
+ * Uses a compact JSON format that Claude can parse reliably.
  */
-function convertToolsToAnthropic(tools: any[]): any[] {
-  return tools.map((t) => ({
-    name: t.function.name,
-    description: t.function.description || "",
-    input_schema: t.function.parameters || { type: "object", properties: {} },
-  }));
+function formatToolsForPrompt(tools: any[]): string {
+  return tools.map((t: any) => {
+    const fn = t.function;
+    const params = fn.parameters?.properties
+      ? Object.entries(fn.parameters.properties).map(([k, v]: [string, any]) =>
+          `    ${k}: ${v.type}${v.description ? ` — ${v.description}` : ""}`
+        ).join("\n")
+      : "    (no parameters)";
+    const required = fn.parameters?.required?.join(", ") || "none";
+    return `${fn.name}:\n  ${fn.description || ""}\n  Parameters:\n${params}\n  Required: ${required}`;
+  }).join("\n\n");
 }
 
 /**
- * Convert our ChatMessage[] to Anthropic messages format.
- * Anthropic has separate system param, and tool results use a different format.
+ * Format ChatMessage[] into a single text prompt for the sub-agent.
  */
-function convertMessages(messages: ChatMessage[]): {
-  system: string;
-  anthropicMessages: any[];
-} {
-  let system = "";
-  const anthropicMessages: any[] = [];
+function formatMessagesForPrompt(messages: ChatMessage[], tools?: any[]): string {
+  const parts: string[] = [];
 
-  for (const msg of messages) {
-    if (msg.role === "system") {
-      system += (system ? "\n\n" : "") + msg.content;
-      continue;
-    }
+  // Extract system message
+  const systemMsgs = messages.filter(m => m.role === "system");
+  const otherMsgs = messages.filter(m => m.role !== "system");
 
-    if (msg.role === "assistant") {
-      const content: any[] = [];
-      if (msg.content) {
-        content.push({ type: "text", text: msg.content });
-      }
+  parts.push(`I'm running an automated test for an open-source project called Automaton-LN (a Bitcoin Lightning agent runtime). I need you to simulate what an autonomous agent would do given its system prompt and available tools.
+
+This is a sandbox test — no real actions are taken. All tool results are mocked. I need you to respond with a JSON object containing the tool calls the agent would make.
+
+Here is the agent's system prompt and available tools:
+
+=== AGENT SYSTEM PROMPT ===
+${systemMsgs.map(m => m.content).join("\n\n")}
+=== END SYSTEM PROMPT ===`);
+
+  if (tools && tools.length > 0) {
+    parts.push(`\n=== AVAILABLE TOOLS ===\n${formatToolsForPrompt(tools)}\n=== END TOOLS ===`);
+  }
+
+  // Add conversation history
+  for (const msg of otherMsgs) {
+    if (msg.role === "user") {
+      parts.push(`\n[AGENT INPUT]: ${msg.content}`);
+    } else if (msg.role === "assistant") {
+      parts.push(`\n[AGENT PREVIOUS RESPONSE]: ${msg.content}`);
       if (msg.tool_calls) {
         for (const tc of msg.tool_calls) {
-          let input: Record<string, unknown>;
-          try {
-            input = JSON.parse(tc.function.arguments);
-          } catch {
-            input = {};
-          }
-          content.push({
-            type: "tool_use",
-            id: tc.id,
-            name: tc.function.name,
-            input,
-          });
+          parts.push(`[TOOL CALLED]: ${tc.function.name}(${tc.function.arguments})`);
         }
       }
-      anthropicMessages.push({ role: "assistant", content });
-      continue;
+    } else if (msg.role === "tool") {
+      parts.push(`\n[TOOL RESULT for ${msg.tool_call_id || msg.name || "unknown"}]: ${msg.content}`);
     }
-
-    if (msg.role === "tool") {
-      anthropicMessages.push({
-        role: "user",
-        content: [
-          {
-            type: "tool_result",
-            tool_use_id: msg.tool_call_id,
-            content: msg.content,
-          },
-        ],
-      });
-      continue;
-    }
-
-    // user message
-    anthropicMessages.push({ role: "user", content: msg.content });
   }
 
-  return { system, anthropicMessages };
+  parts.push(`
+Based on the system prompt, tools, and any previous tool results above, what would this agent do next?
+
+Respond with a JSON object in this format:
+{"thinking":"your reasoning about what the agent should do","tool_calls":[{"name":"tool_name","arguments":{"param":"value"}}]}
+
+For text-only response (no tools): {"thinking":"reasoning","text":"response text","tool_calls":[]}
+To make the agent sleep: include {"name":"sleep","arguments":{"seconds":300}} in tool_calls
+
+Please respond with just the JSON object.`);
+
+  return parts.join("\n");
+}
+
+/**
+ * Parse the sub-agent's JSON response into tool calls.
+ */
+function parseResponse(text: string): {
+  thinking: string;
+  textContent: string;
+  toolCalls: { name: string; arguments: Record<string, unknown> }[];
+} {
+  // Try to extract JSON from the response
+  let json: any;
+
+  // First try: direct parse
+  try {
+    json = JSON.parse(text.trim());
+  } catch {
+    // Try to find JSON in the response (Claude sometimes wraps in markdown)
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      try {
+        json = JSON.parse(jsonMatch[0]);
+      } catch {
+        // Last resort: treat as text-only response
+        return { thinking: text.slice(0, 200), textContent: text, toolCalls: [] };
+      }
+    } else {
+      return { thinking: text.slice(0, 200), textContent: text, toolCalls: [] };
+    }
+  }
+
+  return {
+    thinking: json.thinking || "",
+    textContent: json.text || "",
+    toolCalls: (json.tool_calls || []).map((tc: any) => ({
+      name: tc.name,
+      arguments: tc.arguments || {},
+    })),
+  };
 }
 
 export interface OpenClawInferenceOptions {
-  /** Override model (default: claude-haiku-4-5-20241022 for cost) */
-  model?: string;
-  /** Max output tokens */
-  maxTokens?: number;
-  /** Low-compute model override */
-  lowComputeModel?: string;
+  /** Session ID prefix (default: automaton-sandbox-llm) */
+  sessionPrefix?: string;
 }
 
 /**
- * Create an InferenceClient backed by the Anthropic API using
- * OpenClaw's stored credentials.
- *
- * Returns null if no Anthropic key is found.
+ * Create an InferenceClient that routes through OpenClaw's gateway.
+ * No API keys needed — uses OpenClaw's existing Claude access.
  */
 export function createOpenClawInference(
   options?: OpenClawInferenceOptions,
-): InferenceClient | null {
-  const apiKey = loadAnthropicKey();
-  if (!apiKey) return null;
-
-  const defaultModel = options?.model || "claude-haiku-4-5-20241022";
-  const lowComputeModel = options?.lowComputeModel || "claude-haiku-4-5-20241022";
-  let currentModel = defaultModel;
-  let maxTokens = options?.maxTokens || 4096;
+): InferenceClient {
+  const prefix = options?.sessionPrefix || SESSION_PREFIX;
+  const sessionId = `${prefix}-${Date.now()}`;
+  let lowCompute = false;
+  let callCount = 0;
 
   const chat = async (
     messages: ChatMessage[],
     opts?: InferenceOptions,
   ): Promise<InferenceResponse> => {
-    const model = opts?.model || currentModel;
-    const { system, anthropicMessages } = convertMessages(messages);
+    callCount++;
 
-    const body: Record<string, unknown> = {
-      model,
-      max_tokens: opts?.maxTokens || maxTokens,
-      system,
-      messages: anthropicMessages,
-    };
+    const prompt = formatMessagesForPrompt(messages, opts?.tools);
+    const { text, usage, model } = callOpenClawAgent(sessionId, prompt);
+    const parsed = parseResponse(text);
 
-    if (opts?.temperature !== undefined) {
-      body.temperature = opts.temperature;
-    }
-
-    // Convert and add tools
-    if (opts?.tools && opts.tools.length > 0) {
-      body.tools = convertToolsToAnthropic(opts.tools);
-      body.tool_choice = { type: "auto" };
-    }
-
-    const resp = await fetch(ANTHROPIC_API_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        // OAuth tokens (sk-ant-oat*) use Bearer auth; API keys use x-api-key
-        ...(apiKey.startsWith("sk-ant-oat")
-          ? { Authorization: `Bearer ${apiKey}` }
-          : { "x-api-key": apiKey }),
-        "anthropic-version": ANTHROPIC_VERSION,
+    // Convert to InferenceToolCall format
+    const toolCalls: InferenceToolCall[] = parsed.toolCalls.map((tc, i) => ({
+      id: `tc-${callCount}-${i}`,
+      type: "function" as const,
+      function: {
+        name: tc.name,
+        arguments: JSON.stringify(tc.arguments),
       },
-      body: JSON.stringify(body),
-    });
+    }));
 
-    if (!resp.ok) {
-      const text = await resp.text();
-      throw new Error(`Anthropic API error ${resp.status}: ${text}`);
-    }
-
-    const data = (await resp.json()) as any;
-
-    // Parse Anthropic response format
-    const contentBlocks: any[] = data.content || [];
-    let textContent = "";
-    const toolCalls: InferenceToolCall[] = [];
-
-    for (const block of contentBlocks) {
-      if (block.type === "text") {
-        textContent += block.text;
-      } else if (block.type === "tool_use") {
-        toolCalls.push({
-          id: block.id,
-          type: "function",
-          function: {
-            name: block.name,
-            arguments: JSON.stringify(block.input || {}),
-          },
-        });
-      }
-    }
-
-    const usage: TokenUsage = {
-      promptTokens: data.usage?.input_tokens || 0,
-      completionTokens: data.usage?.output_tokens || 0,
-      totalTokens:
-        (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0),
+    const tokenUsage: TokenUsage = {
+      promptTokens: usage.inputTokens || usage.prompt_tokens || 0,
+      completionTokens: usage.outputTokens || usage.completion_tokens || 0,
+      totalTokens: (usage.inputTokens || usage.prompt_tokens || 0) +
+                   (usage.outputTokens || usage.completion_tokens || 0),
     };
+
+    const content = parsed.thinking || parsed.textContent || "";
 
     return {
-      id: data.id || "",
-      model: data.model || model,
+      id: `openclaw-${callCount}`,
+      model: model || "claude-via-openclaw",
       message: {
         role: "assistant",
-        content: textContent,
+        content,
         tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
       },
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-      usage,
-      finishReason:
-        data.stop_reason === "tool_use"
-          ? "tool_calls"
-          : data.stop_reason || "stop",
+      usage: tokenUsage,
+      finishReason: toolCalls.length > 0 ? "tool_calls" : "stop",
     };
   };
 
   const setLowComputeMode = (enabled: boolean): void => {
-    currentModel = enabled ? lowComputeModel : defaultModel;
-    if (enabled) maxTokens = 2048;
-    else maxTokens = options?.maxTokens || 4096;
+    lowCompute = enabled;
+    // Can't change model on openclaw agent, but we track the state
   };
 
-  const getDefaultModel = (): string => currentModel;
+  const getDefaultModel = (): string => {
+    return lowCompute ? "claude-via-openclaw (low-compute)" : "claude-via-openclaw";
+  };
 
   return { chat, setLowComputeMode, getDefaultModel };
 }
 
 /**
- * Check if OpenClaw inference is available (key exists).
+ * Check if OpenClaw agent CLI is available.
  */
 export function isOpenClawInferenceAvailable(): boolean {
-  return loadAnthropicKey() !== null;
+  try {
+    execSync("which openclaw", { encoding: "utf-8", stdio: "pipe" });
+    return true;
+  } catch {
+    return false;
+  }
 }
