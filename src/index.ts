@@ -42,6 +42,7 @@ Sovereign AI Agent Runtime (Lightning-native)
 
 Usage:
   automaton --run          Start the automaton (first run triggers setup wizard)
+  automaton --dry-run      Run E2E smoke test (mock wallet + inference, 1 turn)
   automaton --setup        Re-run the interactive setup wizard
   automaton --init         Initialize Lightning wallet
   automaton --status       Show current automaton status
@@ -70,6 +71,13 @@ Environment:
     const { runSetupWizard } = await import("./setup/wizard.js");
     await runSetupWizard();
     process.exit(0);
+  }
+
+  if (args.includes("--dry-run")) {
+    const { runDryRun, printReport } = await import("./testing/dry-run.js");
+    const report = await runDryRun();
+    printReport(report);
+    process.exit(report.failed > 0 ? 1 : 0);
   }
 
   if (args.includes("--run")) {
