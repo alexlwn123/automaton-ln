@@ -127,8 +127,7 @@ export function createHeartbeatDaemon(
       if (isLowCompute) {
         const essentialTasks = [
           "heartbeat_ping",
-          "check_credits",
-          "check_usdc_balance",
+          "check_balance",
           "check_social_inbox",
         ];
         if (!essentialTasks.includes(entry.task)) continue;

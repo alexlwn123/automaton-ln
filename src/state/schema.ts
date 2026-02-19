@@ -3,6 +3,12 @@
  *
  * All tables for the automaton's persistent state.
  * The database IS the automaton's memory.
+ *
+ * NOTE: Some column names retain legacy naming (cost_cents, amount_cents,
+ * balance_after_cents, funded_amount_cents, chain, address) for backward
+ * compatibility with existing databases. The TypeScript types use
+ * Lightning-native names (costSats, amountSats, balanceAfterSats,
+ * fundedAmountSats, platform, pubkey). Mapping occurs in database.ts.
  */
 
 export const SCHEMA_VERSION = 3;

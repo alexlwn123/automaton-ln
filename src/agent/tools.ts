@@ -1042,13 +1042,13 @@ Model: ${ctx.inference.getDefaultModel()}
     },
     {
       name: "give_feedback",
-      description: "Leave on-chain reputation feedback for another agent.",
+      description: "Leave reputation feedback for another agent via Nostr.",
       category: "registry",
       dangerous: true,
       parameters: {
         type: "object",
         properties: {
-          agent_id: { type: "string", description: "Target agent's ERC-8004 ID" },
+          agent_id: { type: "string", description: "Target agent's pubkey or Nostr npub" },
           score: { type: "number", description: "Score 1-5" },
           comment: { type: "string", description: "Feedback comment" },
         },
@@ -1200,7 +1200,7 @@ Model: ${ctx.inference.getDefaultModel()}
         properties: {
           to_address: {
             type: "string",
-            description: "Recipient wallet address (0x...)",
+            description: "Recipient pubkey (hex or npub)",
           },
           content: {
             type: "string",

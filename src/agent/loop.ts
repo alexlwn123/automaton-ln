@@ -204,7 +204,7 @@ export async function runAgentLoop(
         thinking: response.message.content || "",
         toolCalls: [],
         tokenUsage: response.usage,
-        costSats: estimateCostCents(response.usage, inference.getDefaultModel()),
+        costSats: estimateCostSats(response.usage, inference.getDefaultModel()),
       };
 
       // ── Execute Tool Calls ──
@@ -323,12 +323,13 @@ async function getFinancialStateFn(getBalanceFn: () => Promise<number>): Promise
   };
 }
 
-function estimateCostCents(
+function estimateCostSats(
   usage: { promptTokens: number; completionTokens: number },
   model: string,
 ): number {
-  // Rough cost estimation per million tokens
-  const pricing: Record<string, { input: number; output: number }> = {
+  // Rough cost estimation per million tokens (in cents, then converted to sats)
+  // Using ~$100k/BTC → 1 cent ≈ 10 sats
+  const pricingCentsPerMillion: Record<string, { input: number; output: number }> = {
     "gpt-4o": { input: 250, output: 1000 },
     "gpt-4o-mini": { input: 15, output: 60 },
     "gpt-4.1": { input: 200, output: 800 },
@@ -340,12 +341,18 @@ function estimateCostCents(
     "o4-mini": { input: 110, output: 440 },
     "claude-sonnet-4-5": { input: 300, output: 1500 },
     "claude-haiku-4-5": { input: 100, output: 500 },
+    // AutoClaw profiles — use average cost estimates
+    "autoclaw/premium": { input: 300, output: 1500 },
+    "autoclaw/auto": { input: 150, output: 600 },
+    "autoclaw/eco": { input: 30, output: 120 },
+    "autoclaw": { input: 150, output: 600 },
   };
 
-  const p = pricing[model] || pricing["gpt-4o"];
-  const inputCost = (usage.promptTokens / 1_000_000) * p.input;
-  const outputCost = (usage.completionTokens / 1_000_000) * p.output;
-  return Math.ceil((inputCost + outputCost) * 1.3); // 1.3x Conway markup
+  const SATS_PER_CENT = 10; // ~$100k/BTC
+  const p = pricingCentsPerMillion[model] || pricingCentsPerMillion["gpt-4o"];
+  const inputCostCents = (usage.promptTokens / 1_000_000) * p.input;
+  const outputCostCents = (usage.completionTokens / 1_000_000) * p.output;
+  return Math.ceil((inputCostCents + outputCostCents) * SATS_PER_CENT);
 }
 
 function log(config: AutomatonConfig, message: string): void {

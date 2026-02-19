@@ -145,7 +145,7 @@ describe("Survival System", () => {
       const transition = recordTransition(db, "normal", "low_compute", 15000);
       expect(transition.from).toBe("normal");
       expect(transition.to).toBe("low_compute");
-      expect(transition.creditsCents).toBe(15000);
+      expect(transition.balanceSats).toBe(15000);
       expect(transition.timestamp).toBeDefined();
     });
 

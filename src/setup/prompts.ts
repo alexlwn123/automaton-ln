@@ -60,11 +60,14 @@ export async function promptMultiline(label: string): Promise<string> {
   return result;
 }
 
-export async function promptAddress(label: string): Promise<string> {
+export async function promptPubkey(label: string): Promise<string> {
   while (true) {
     const value = await ask(chalk.white(`  → ${label}: `));
-    if (/^0x[0-9a-fA-F]{40}$/.test(value)) return value;
-    console.log(chalk.yellow("  Invalid Ethereum address. Must be 0x followed by 40 hex characters."));
+    // Accept hex pubkeys (66 chars for compressed, 64 for raw) or npub1... Nostr keys
+    if (/^(02|03)[0-9a-fA-F]{64}$/.test(value)) return value;
+    if (/^[0-9a-fA-F]{64}$/.test(value)) return value;
+    if (/^npub1[a-z0-9]{58,}$/.test(value)) return value;
+    console.log(chalk.yellow("  Invalid pubkey. Must be a hex public key (64-66 chars) or Nostr npub."));
   }
 }
 

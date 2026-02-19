@@ -16,7 +16,7 @@ export interface ModeTransition {
   from: SurvivalTier;
   to: SurvivalTier;
   timestamp: string;
-  creditsCents: number;
+  balanceSats: number;
 }
 
 /**
@@ -58,13 +58,13 @@ export function recordTransition(
   db: AutomatonDatabase,
   from: SurvivalTier,
   to: SurvivalTier,
-  creditsCents: number,
+  balanceSats: number,
 ): ModeTransition {
   const transition: ModeTransition = {
     from,
     to,
     timestamp: new Date().toISOString(),
-    creditsCents,
+    balanceSats,
   };
 
   // Store transition history
